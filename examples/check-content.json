@@ -1,0 +1,188 @@
+{
+  "name": "Guardful AI \u2014 continue only on completed Allow",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "44444444-4444-4444-8444-444444444444",
+      "name": "When clicking Execute Workflow",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{content:'first@example.test',event_id:'ticket-100'}},{json:{content:'second@example.test',event_id:'ticket-101'}}];"
+      },
+      "id": "55555555-5555-4555-8555-555555555555",
+      "name": "Synthetic messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "checkContent",
+        "scanPolicy": {
+          "mode": "id",
+          "value": "00000000-0000-4000-8000-000000000002::1",
+          "__rl": true
+        },
+        "content": "={{ $json.content }}",
+        "eventId": "={{ $json.event_id }}",
+        "direction": "input",
+        "context": "",
+        "returnRedactedContent": true,
+        "concurrency": 2,
+        "output": "simplified"
+      },
+      "id": "66666666-6666-4666-8666-666666666666",
+      "name": "Guardful AI Check Content",
+      "type": "n8n-nodes-guardfulai.guardfulai",
+      "typeVersion": 1,
+      "position": [
+        460,
+        0
+      ],
+      "onError": "stopWorkflow"
+    },
+    {
+      "id": "77777777-7777-4777-8777-777777777777",
+      "name": "Continue only on Allow",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        700,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "528b397e-227e-5017-b857-bb1630073fff",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "f45bd0e8-de2b-568b-9676-60747c5f859e",
+              "leftValue": "={{ $json.decision }}",
+              "rightValue": "allow",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "fe5f412f-7ce1-550a-8018-6913fc648cf7",
+              "leftValue": "={{ $json.safe_to_continue }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": false,
+          "looseTypeValidation": false
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "88888888-8888-4888-8888-888888888880",
+      "name": "Allowed \u2014 attach your reviewed action",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        950,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "88888888-8888-4888-8888-888888888881",
+      "name": "Review, Block or incomplete \u2014 stop here",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        950,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "When clicking Execute Workflow": {
+      "main": [
+        [
+          {
+            "node": "Synthetic messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Synthetic messages": {
+      "main": [
+        [
+          {
+            "node": "Guardful AI Check Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardful AI Check Content": {
+      "main": [
+        [
+          {
+            "node": "Continue only on Allow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue only on Allow": {
+      "main": [
+        [
+          {
+            "node": "Allowed \u2014 attach your reviewed action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Review, Block or incomplete \u2014 stop here",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

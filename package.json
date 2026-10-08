@@ -1,0 +1,68 @@
+{
+  "name": "n8n-nodes-guardfulai",
+  "version": "0.1.0",
+  "description": "Check content and prepare dataset reporting with Guardful AI",
+  "license": "MIT",
+  "homepage": "https://www.guardfulai.com/integrations/n8n/",
+  "keywords": [
+    "n8n-community-node-package"
+  ],
+  "author": {
+    "name": "GuardfulAI",
+    "email": "guardfultom@users.noreply.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guardfulai/n8n-nodes-guardfulai.git"
+  },
+  "scripts": {
+    "build": "n8n-node build",
+    "build:watch": "tsc --watch",
+    "dev": "n8n-node dev",
+    "qa:local": "node scripts/qa-local.mjs",
+    "qa:prepare": "node scripts/qa-local.mjs --prepare",
+    "qa:verify": "node scripts/qa-verify.mjs",
+    "lint": "n8n-node lint",
+    "lint:fix": "n8n-node lint --fix",
+    "release": "n8n-node release",
+    "prepublishOnly": "n8n-node prerelease",
+    "test": "node --test test/*.test.mjs",
+    "check:package": "node scripts/check-package.mjs",
+    "prepack": "npm run build",
+    "pretest": "npm run build"
+  },
+  "files": [
+    "dist/nodes",
+    "dist/credentials"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": true,
+    "credentials": [
+      "dist/credentials/GuardfulAIApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/GuardfulAI/Guardfulai.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@n8n/node-cli": "0.51.3",
+    "eslint": "9.32.0",
+    "prettier": "3.6.2",
+    "release-it": "^21.1.0",
+    "typescript": "5.9.2"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "bugs": {
+    "url": "https://github.com/guardfulai/n8n-nodes-guardfulai/issues"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

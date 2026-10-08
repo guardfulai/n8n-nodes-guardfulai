@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tgz
+.env
+.env.*
+.local/
+.n8n/
+coverage/
+*.tsbuildinfo
+.DS_Store

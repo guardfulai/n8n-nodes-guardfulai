@@ -1,0 +1,32 @@
+# Configure npm bootstrap authentication, then Trusted Publishing as documented
+# in npm's publishing documentation. This workflow runs only after a tag push.
+name: Publish
+on:
+  push:
+    tags: ['*.*.*']
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+      - name: Ensure npm supports Trusted Publishing
+        run: npm install --global npm@11
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+      - run: npm run check:package
+      - name: Check tag matches package version
+        run: node -e 'if (process.env.GITHUB_REF_NAME !== require("./package.json").version) process.exit(1)'
+      - name: Publish with provenance
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

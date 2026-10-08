@@ -1,0 +1,9 @@
+{
+  "node": "n8n-nodes-guardfulai.guardfulai",
+  "nodeVersion": "1.0",
+  "codexVersion": "1.0",
+  "categories": ["Miscellaneous"],
+  "resources": {
+    "primaryDocumentation": [{ "url": "https://www.guardfulai.com/integrations/n8n/" }]
+  }
+}
