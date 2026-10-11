@@ -71,17 +71,21 @@ Review and Block go to separate handling, never to the next consuming action.
 Unknown/malformed results, authentication, credit, transport and API failures also
 must not proceed. Default errors stop the workflow. With **Continue On Fail**, the
 node returns `status: error`, `safe_to_continue: false` and a sanitized
-`guardfulai_error`; it never carries Allow fields from the input into an error result.
+`guardfulai_error` with status, code, retryable, message and recovery description; it never carries Allow fields from the input into an error result.
 Do not rely only on `decision`, HTTP status, a truthy string, or absence of findings.
 
 ### Output and redaction
 
-**Simplified** (default) returns ten fields: scan ID, status, decision, safe-to-continue,
+**Simplified** (default) returns up to ten fields: scan ID, status, decision, safe-to-continue,
 policy version, flagged/redacted flags, optional redacted content, replay flag and usage.
 **Raw** returns the full validated result projection, including findings, check summaries,
 runtime identity and semantic assessments when present. It does not return an unfiltered
 HTTP body. **Selected Fields** lets you choose additional fields; scan ID, status,
-decision and safe-to-continue remain present. Safety validation runs before projection.
+decision and safe-to-continue remain present. Safety validation runs before projection. Original input, input availability and
+retention metadata are available in Raw and Selected Fields, but never Simplified,
+even when **Original Input in Output → Show** is selected. Choosing **Original Input**
+in Selected Fields requests input unless **Options → Original Input in Output → Hide**
+is set.
 
 Redacted content is returned only when requested and supplied by the API. Redaction
 alone does not grant permission to continue; apply the complete routing rule. A custom
@@ -97,6 +101,21 @@ insufficient credits, non-retryable conflicts and malformed results are not retr
 A timeout may follow a settled scan: replaying the same identity recovers its result
 instead of requesting another scan. Resolve credentials/scopes, credits or conflicting
 mappings before trying again; do not generate a fresh identity just to bypass a conflict.
+
+
+Errors explain the blocked operation and how to recover. With Continue On Fail,
+read `guardfulai_error.message` and `guardfulai_error.description` alongside its
+sanitized machine code. Unknown service bodies and exceptions are not displayed.
+
+| What happened | How to recover |
+| --- | --- |
+| Invalid or expired API key | Replace the key in the Guardful AI API credential and test the connection |
+| Missing operation or policy access | Check the key's allowed operations and Scan Policies in Integration keys |
+| Insufficient credits | Open Guardful AI Usage and check available credits before retrying |
+| Invalid or unavailable policy version | Refresh Scan Policy or enter an accessible published `ID::version`; check Direction |
+| Service unreachable or request timed out | Check Service Origin and connectivity from the n8n host; replay checks with the same identity and request values |
+| Dataset creation response uncertain | Use List Datasets before creating again; recover a run with the same Run Identity |
+| Invalid parameter or unexpected response | Correct the named parameter, or contact support with sanitized codes and versions |
 
 ## Datasets and reporting
 
@@ -126,13 +145,44 @@ service actions. Select your credential and actual policy/version. Its
 in harmless placeholders. Replace them only after validating your routing. Credential
 references are absent; policy IDs are placeholders, not usable account data.
 
-## Privacy
+## Privacy and input retention
 
-n8n receives mapped content and can retain input, context, supplied fields, output,
-findings and redacted text in execution history even if Guardful AI does not retain
-realtime content. Set retention/pruning and access controls for your n8n deployment.
-Use synthetic content for QA. Do not include secrets or content in node names,
-reporting dimensions, diagnostics, workflow exports or notifications.
+Check Content sends mapped content, optional context and supplied fields, direction,
+policy/version identifiers, the source event identity, and optional reporting metadata
+to the configured Guardful AI service. The API key is sent for authentication.
+Dataset operations send their setup parameters; they do not scan content.
+
+Authenticated original input—including text, context, supplied fields and direction—is
+stored separately from results according to the organization retention setting,
+initially **seven days**. Organization owners can change that default in Guardful AI
+account settings. Results, policy versions, credit usage and retry records are stored
+separately. Guardful AI does not retain returned redacted output. See the
+[privacy policy](https://www.guardfulai.com/privacy/) and
+[API documentation](https://www.guardfulai.com/api/).
+
+In the n8n node's **Parameters → Check Content → Options → Add Option**, choose
+**Input Retention**. **Organization Default** inherits the configured duration;
+**None**, **1 Day**, **7 Days** and **30 Days** override it for new checks.
+To disable storage, set **Check Content → Options → Input Retention → None**.
+Exact retries preserve the first retention choice and expiry; they do not extend
+storage or apply changed retention settings to an existing scan. A retention failure
+is reported as unavailable retention in Raw or Selected Fields and does not change
+the check decision.
+
+Under **Options → Add Option → Original Input in Output**, **Organization Default**
+inherits organization visibility, **Show** requests available input, and **Hide**
+omits it. Hide controls response visibility and does not disable storage. None
+disables storage but does not prevent immediate input from being returned when
+requested. Simplified never returns original input or its retention metadata; use
+Raw or Selected Fields to inspect these. Selecting Original Input requests it unless
+explicitly hidden. Access to historical input requires the corresponding permission.
+
+n8n can retain mapped input, context, supplied fields, findings, original input and
+redacted text in execution history independently of Guardful AI. None and Hide do
+not delete n8n history or previously retained Guardful AI input. Configure n8n's
+execution retention/pruning and access controls separately. Use synthetic content
+for QA. Keep secrets and content out of node names, reporting dimensions,
+diagnostics, workflow exports and notifications.
 
 ## Local development
 
@@ -166,17 +216,18 @@ license and README are distributed. Tests and examples remain source-repository 
 
 ## Publication and support
 
-CI checks the node on pushes and pull requests. The prepared `publish.yml` runs only
-on version tags such as `0.1.0`, checks the package, and publishes through GitHub Actions
-with provenance. Tags/releases, npm publication and Creator Portal submission require
-explicit owner authorization. Do not run `npm run release` as a validation command.
-For the first unpublished name, bootstrap authentication precedes Trusted Publisher
-configuration; future publishing uses OIDC. No publication settings are configured here.
+Install the published `n8n-nodes-guardfulai` package in self-hosted n8n through
+**Settings → Community Nodes → Install**. n8n Cloud installation depends on
+verification and availability in its node picker.
 
-Use [Guardful AI help](https://www.guardfulai.com/help/) for service questions and the
-intended public repository's issues after it is created for node-specific problems.
-Report sanitized error codes and versions; never share keys or request content.
+[Public source](https://github.com/guardfulai/n8n-nodes-guardfulai) and
+[npm releases](https://www.npmjs.com/package/n8n-nodes-guardfulai) are available.
+CI checks pushes and pull requests. The `publish.yml` GitHub Actions workflow
+checks version tags matching the package version and publishes with provenance
+using Trusted Publishing. Maintainers need explicit release authorization before
+running `npm run release`, pushing release tags or submitting through Creator Portal.
+Release commands are not validation commands; do not publish locally.
 
-## Input retention
-
-New checks inherit the organization input retention (seven days by default) and original-input visibility. The node can choose no retention, one, seven, or thirty days and explicitly show or hide input. Available input and retention status are included in simplified and raw outputs; selected output exposes these as optional fields. Retention failures do not change the check decision. n8n execution history has its own retention settings.
+Use [Guardful AI help](https://www.guardfulai.com/help/) for service questions and
+[GitHub issues](https://github.com/guardfulai/n8n-nodes-guardfulai/issues) for node-specific
+problems. Report sanitized codes and versions; never share keys or request content.

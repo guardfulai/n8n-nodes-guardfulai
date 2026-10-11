@@ -2,6 +2,13 @@ import { createHash } from "node:crypto";
 
 import { sleep } from "n8n-workflow";
 
+import {
+  GuardfulAIContractError,
+  GuardfulAIRequestError,
+  requestError,
+} from "./errors";
+export { GuardfulAIRequestError } from "./errors";
+
 import { reportingContext, type ReportingContext } from "./reporting";
 
 export interface PolicyOption {
@@ -45,22 +52,9 @@ export type Requester = (request: {
 type JsonObject = Record<string, unknown>;
 export const REQUEST_TIMEOUT_MS = 30_000;
 
-class GuardfulAIContractError extends Error {}
-
 function failContract(code: string): never {
   const error = new GuardfulAIContractError(code);
   throw error;
-}
-
-export class GuardfulAIRequestError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    readonly retryable: boolean,
-  ) {
-    super(`Guardful AI request failed (${status}: ${code})`);
-    this.name = "GuardfulAIRequestError";
-  }
 }
 
 export function normalizeOrigin(value: unknown): string {
@@ -385,16 +379,6 @@ function projectOutput(body: unknown): JsonObject {
   };
 }
 
-function errorFrom(response: HttpResponse): GuardfulAIRequestError {
-  const body = record(response.body);
-  return new GuardfulAIRequestError(
-    response.statusCode,
-    typeof body.code === "string" ? body.code : "integration_transport_error",
-    body.retryable === true &&
-      [409, 429, 503, 504].includes(response.statusCode),
-  );
-}
-
 function retryDelay(response: HttpResponse): number {
   const value = response.headers?.["retry-after"];
   const seconds = Number(Array.isArray(value) ? value[0] : value);
@@ -422,11 +406,14 @@ export async function checkContent(
   };
   if (input.inputRetentionDays !== undefined) {
     if (![0, 1, 7, 30].includes(input.inputRetentionDays))
-      throw new TypeError("input_retention_invalid");
+      failContract("input_retention_invalid");
     payload.input_retention_days = input.inputRetentionDays;
   }
-  if (input.includeInput !== undefined)
+  if (input.includeInput !== undefined) {
+    if (typeof input.includeInput !== "boolean")
+      failContract("include_input_invalid");
     payload.include_input = input.includeInput;
+  }
   if (input.context) payload.context = input.context;
   const fields = parseStructuredFields(input.structuredFields);
   if (fields !== undefined) payload.structured_fields = fields;
@@ -455,7 +442,7 @@ export async function checkContent(
         failContract("policy_version_mismatch");
       return output;
     }
-    const error = errorFrom(response);
+    const error = requestError(response);
     if (!error.retryable || attempt === 2) throw error;
     await wait(retryDelay(response));
   }

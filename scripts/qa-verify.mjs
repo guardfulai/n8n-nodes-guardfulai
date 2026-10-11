@@ -55,6 +55,7 @@ const report = {
   n8n: "2.42.4",
   startup: [],
   errors: [],
+  outputs: [],
   productionRequests: 0,
 };
 let runner, stub;
@@ -163,6 +164,19 @@ try {
   assert.ok(loader.credentialTypes.guardfulaiApi);
   report.packagedNodeLoaded = true;
   report.packagedCredentialLoaded = true;
+  const packedNode = loader.getNode("guardfulai").type;
+  const packedCredential = loader.getCredential("guardfulaiApi").type;
+  assert.equal(packedCredential.test, undefined);
+  assert.equal(
+    packedNode.description.credentials[0].testedBy,
+    "testGuardfulAICredential",
+  );
+  assert.ok(packedNode.methods.credentialTest.testGuardfulAICredential);
+  const options = packedNode.description.properties.find(
+    (property) => property.name === "options",
+  );
+  assert.deepEqual(options.displayOptions.show.operation, ["checkContent"]);
+  assert.equal(packedNode.description.properties[0].name, "operation");
 
   let firstExport;
   for (let cycle = 0; cycle < 2; cycle++) {
@@ -263,12 +277,37 @@ try {
   );
   report.sourceNodeAndCredentialLoaded = true;
 
-  // Execute ONLY local errors in a disposable database with the actual packed node.
+  // Execute only synthetic local responses in a disposable database with the packed node.
   const smokeRoot = join(scratch, "host");
   linkPackage(smokeRoot, packageDir);
   const stubPort = await freePort(5978);
   const brokerPort = await freePort(stubPort + 100);
   stub = await startStub(stubPort);
+  const {
+    CredentialTestContext,
+  } = require("./node_modules/n8n-core/dist/execution-engine/node-execution-context/credentials-test-context.js");
+  const credentialContext = new CredentialTestContext();
+  report.credentials = [];
+  for (const [key, status] of [
+    ["qa-output", "OK"],
+    ["qa-credential-auth", "Error"],
+    ["qa-credential-scope", "Error"],
+    ["qa-transport", "Error"],
+  ]) {
+    const outcome =
+      await packedNode.methods.credentialTest.testGuardfulAICredential.call(
+        credentialContext,
+        {
+          id: "synthetic-credential",
+          name: "Synthetic local credential",
+          type: "guardfulaiApi",
+          data: { serviceOrigin: `http://127.0.0.1:${stubPort}`, apiKey: key },
+        },
+      );
+    assert.equal(outcome.status, status);
+    assert.equal(outcome.message.includes("PRIVATE_QA_DETAIL"), false);
+    report.credentials.push({ key, status });
+  }
   const env = hostEnvironment(
     base,
     smokeRoot,
@@ -287,6 +326,10 @@ try {
     ["qa-auth", "invalid_api_key"],
     ["qa-conflict", "idempotency_conflict"],
     ["qa-transport", "integration_transport_error"],
+    ["qa-scope", "scope_denied"],
+    ["qa-credits", "insufficient_credits"],
+    ["qa-policy", "scan_policy_not_found"],
+    ["qa-hostile", "integration_transport_error"],
   ]) {
     const credentials = join(scratch, "dummy.json");
     privateJson(credentials, [
@@ -321,6 +364,12 @@ try {
           assert.equal(item.json.status, "error");
           assert.equal(item.json.safe_to_continue, false);
           assert.equal(item.json.guardfulai_error.code, expectedCode);
+          assert.ok(item.json.guardfulai_error.message);
+          assert.ok(item.json.guardfulai_error.description);
+          assert.equal(
+            JSON.stringify(item).includes("PRIVATE_QA_DETAIL"),
+            false,
+          );
           assert.equal(Object.hasOwn(item.json, "decision"), false);
           assert.equal(Object.hasOwn(item.json, "content"), false);
         }
@@ -335,6 +384,11 @@ try {
       } else {
         assert.ok(result.error);
         assert.ok(JSON.stringify(result.error).includes(expectedCode));
+        assert.ok(result.error.description);
+        assert.equal(
+          JSON.stringify(result.error).includes("PRIVATE_QA_DETAIL"),
+          false,
+        );
         assert.equal(result.runData["Allow — harmless end"], undefined);
       }
       report.errors.push({
@@ -345,6 +399,87 @@ try {
         code: expectedCode,
       });
     }
+  }
+  const outputCredential = join(scratch, "output-credential.json");
+  privateJson(outputCredential, [
+    {
+      id: dummyCredentialId,
+      name: "Guardful AI synthetic output QA",
+      type: "guardfulaiApi",
+      data: {
+        serviceOrigin: `http://127.0.0.1:${stubPort}`,
+        apiKey: "qa-output",
+      },
+    },
+  ]);
+  await command(
+    [n8n, "import:credentials", `--input=${outputCredential}`],
+    env,
+    "credential-output",
+  );
+  rmSync(outputCredential);
+  for (const mode of ["simplified", "raw", "selected"]) {
+    const fixture = structuredClone(fixtures[0]);
+    const check = fixture.nodes.find(
+      (value) => value.name === "Guardful AI Check Content",
+    );
+    check.parameters.output = mode;
+    check.parameters.outputFields = ["input", "input_state", "input_retention"];
+    check.parameters.options = {
+      inputRetentionDays: "={{ $itemIndex === 0 ? 0 : 7 }}",
+      includeInput: "={{ $itemIndex === 0 ? 'false' : 'true' }}",
+    };
+    const path = join(scratch, `output-${mode}.json`);
+    privateJson(path, [fixture]);
+    await command(
+      [n8n, "import:workflow", `--input=${path}`],
+      env,
+      `output-import-${mode}`,
+    );
+    const output = await command(
+      [n8n, "execute", `--id=${fixture.id}`, "--rawOutput"],
+      env,
+      `output-${mode}`,
+    );
+    const result = execution(output).data.resultData;
+    assert.equal(result.error, undefined);
+    const items = result.runData["Guardful AI Check Content"][0].data.main[0];
+    assert.equal(items.length, 2);
+    for (const item of items) {
+      assert.equal(item.json.status, "completed");
+      assert.equal(item.json.decision, "allow");
+      assert.equal(item.json.safe_to_continue, true);
+      assert.equal(typeof item.json.scan_id, "string");
+    }
+    if (mode === "simplified") {
+      for (const item of items) {
+        assert.equal(Object.keys(item.json).length, 10);
+        for (const field of ["input", "input_state", "input_retention"])
+          assert.equal(Object.hasOwn(item.json, field), false);
+      }
+    } else {
+      assert.equal(items[0].json.input_state, "hidden");
+      assert.equal(Object.hasOwn(items[0].json, "input"), false);
+      assert.equal(items[0].json.input_retention.retention_days, 0);
+      assert.equal(items[1].json.input_state, "available");
+      assert.equal(items[1].json.input_retention.retention_days, 7);
+      assert.equal(typeof items[1].json.input.content, "string");
+    }
+    assert.equal(
+      result.runData["Continue only on Allow"][0].data.main[0].length,
+      2,
+    );
+    const paired = result.runData["Inspect pairing"][0].data.main[0];
+    assert.deepEqual(
+      paired.map((item) => item.json.qa_input_index),
+      [0, 1],
+    );
+    report.outputs.push({
+      mode,
+      items: 2,
+      optionsExpressions: "per-item duration and visibility",
+      credits: 0,
+    });
   }
   report.shutdown =
     "editor, stub and broker ports released; runner lock removed";

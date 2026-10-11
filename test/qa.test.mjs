@@ -248,6 +248,10 @@ test("local stub supplies unbillable auth, conflict and transport failures", asy
     for (const [key, status, code] of [
       ["qa-auth", 401, "invalid_api_key"],
       ["qa-conflict", 409, "idempotency_conflict"],
+      ["qa-scope", 403, "scope_denied"],
+      ["qa-credits", 402, "insufficient_credits"],
+      ["qa-policy", 404, "scan_policy_not_found"],
+      ["qa-hostile", 500, "PRIVATE_QA_DETAIL"],
     ]) {
       const response = await fetch(`${origin}/v1/check`, {
         method: "POST",

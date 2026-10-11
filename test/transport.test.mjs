@@ -197,7 +197,7 @@ test("retention and visibility inherit or explicitly override without changing r
   }
 });
 
-test("authorized input survives simplified raw and selected outputs; hidden input stays absent", async () => {
+test("authorized input is available only in raw and selected outputs; hidden input stays absent", async () => {
   const { selectOutput } = await import("../dist/nodes/GuardfulAI/output.js");
   const original = {
     content: "synthetic 世界",
@@ -221,7 +221,12 @@ test("authorized input survives simplified raw and selected outputs; hidden inpu
     }),
     input,
   );
-  for (const mode of ["simplified", "raw", "selected"])
+  for (const field of ["input", "input_state", "input_retention"])
+    assert.equal(
+      Object.hasOwn(selectOutput(result, "simplified", []), field),
+      false,
+    );
+  for (const mode of ["raw", "selected"])
     assert.deepEqual(selectOutput(result, mode, ["input"]).input, original);
   const hidden = await checkContent(
     async () => ({

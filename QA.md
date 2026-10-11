@@ -101,7 +101,12 @@ from the latest execution. Close the node panel to return to the canvas.
    expressions, **Direction → Input**, **Return Redacted Content** on,
    **Concurrency → 2**, and **Context**, **Supplied Fields (JSON)** and
    **Dataset Reporting Context** blank. **Output** is also in this Parameters tab:
-   start with **Simplified**. For the projection cases choose **Raw**, or
+   start with **Simplified**. It contains at most ten fields and omits original input,
+   input availability and retention metadata. In **Options → Add Option**, choose
+   **Input Retention** to set Organization Default, None, 1 Day, 7 Days or 30 Days;
+   choose **Original Input in Output** to inherit, Show or Hide input in Raw or
+   Selected Fields. For no Guardful AI input storage choose **None**; Hide alone
+   does not disable storage. n8n retains its execution history separately. For the projection cases choose **Raw**, or
    **Selected Fields** and then select **Findings**, **Replayed**, and **Usage** in
    the **Fields** selector that appears. Close the panel and save workflow changes
    if the editor shows them as unsaved. Review the five-scan budget below before
@@ -206,7 +211,7 @@ Check Content** node, select **Parameters**, and use the credential dropdown →
 Name it **Guardful AI QA dummy (local only)** and select it in both error workflows.
 
 Report: host/node versions, scenario, output mode, status/decision, sanitized
-error code, pairing result, replay identity match and observed credit delta.
+error code, message and recovery description, pairing result, replay identity match and observed credit delta.
 Exclude keys, headers, account/policy identifiers, request bodies and credential
 exports. For a reproducible node defect, open an issue in the repository with these
 sanitized observations, the expected behavior and reproduction steps using synthetic

@@ -30,6 +30,7 @@ try {
     "dist/credentials/GuardfulAIApi.credentials",
     "dist/nodes/GuardfulAI/Guardfulai.node",
     "dist/nodes/GuardfulAI/dataset-setup",
+    "dist/nodes/GuardfulAI/errors",
     "dist/nodes/GuardfulAI/output",
     "dist/nodes/GuardfulAI/reporting",
     "dist/nodes/GuardfulAI/transport",

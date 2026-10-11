@@ -4,7 +4,8 @@ import {
   datasetWrite,
   recordId,
 } from "./reporting";
-import { GuardfulAIRequestError, type Requester } from "./transport";
+import { contractError, GuardfulAIRequestError, requestError } from "./errors";
+import type { Requester, HttpResponse } from "./transport";
 
 export interface DatasetSetupInput {
   operation: string;
@@ -13,6 +14,14 @@ export interface DatasetSetupInput {
   dataset?: string;
   externalId?: string;
   page?: number;
+}
+
+function setupValue<T>(read: () => T, code: string): T {
+  try {
+    return read();
+  } catch {
+    throw contractError(code);
+  }
 }
 
 export async function datasetSetup(
@@ -27,27 +36,42 @@ export async function datasetSetup(
       throw new GuardfulAIRequestError(422, "dataset_page_invalid", false);
     url += `?page=${page}&page_size=50`;
   } else if (input.operation === "createDataset") {
-    body = datasetWrite(input.name, input.basis);
+    body = setupValue(
+      () => datasetWrite(input.name, input.basis),
+      "dataset_parameters_invalid",
+    );
   } else if (input.operation === "createDatasetRun") {
-    url += `/${datasetId(input.dataset)}/runs`;
-    body = { external_id: recordId(input.externalId), source_kind: "n8n" };
+    url += `/${setupValue(() => datasetId(input.dataset), "dataset_id_invalid")}/runs`;
+    body = {
+      external_id: setupValue(
+        () => recordId(input.externalId),
+        "run_identity_invalid",
+      ),
+      source_kind: "n8n",
+    };
   } else {
     throw new GuardfulAIRequestError(422, "dataset_operation_invalid", false);
   }
   // Setup never scans. An uncertain create is resolved by listing/selecting;
   // an uncertain run is recovered by invoking the same immutable external ID.
-  const response = await request({
-    method: body ? "POST" : "GET",
-    url,
-    headers: {},
-    body,
-  });
-  if (![200, 201].includes(response.statusCode))
-    throw new GuardfulAIRequestError(
-      response.statusCode,
-      "dataset_setup_failed",
-      false,
-    );
+  let response: HttpResponse;
+  try {
+    response = await request({
+      method: body ? "POST" : "GET",
+      url,
+      headers: {},
+      body,
+    });
+  } catch {
+    throw requestError({
+      statusCode: 503,
+      body: { code: "integration_transport_error" },
+    });
+  }
+  if (![200, 201].includes(response.statusCode)) {
+    const error = requestError(response, "dataset_setup_failed");
+    throw new GuardfulAIRequestError(error.status, error.code, false);
+  }
   if (
     !response.body ||
     typeof response.body !== "object" ||
@@ -63,7 +87,10 @@ export async function datasetSetup(
     )
       throw new GuardfulAIRequestError(502, "dataset_response_invalid", false);
     return {
-      datasets: data.datasets.map(datasetProjection),
+      datasets: setupValue(
+        () => (data.datasets as unknown[]).map(datasetProjection),
+        "dataset_response_invalid",
+      ),
       total: data.total,
       page: input.page ?? 1,
       credits_consumed: 0,
@@ -71,16 +98,24 @@ export async function datasetSetup(
   }
   if (input.operation === "createDatasetRun") {
     if (
-      data.dataset_id !== datasetId(input.dataset) ||
+      data.dataset_id !== input.dataset?.toLowerCase() ||
       data.external_id !== input.externalId
     )
       throw new GuardfulAIRequestError(502, "dataset_response_invalid", false);
     return {
-      dataset_id: datasetId(data.dataset_id),
-      run_id: datasetId(data.id),
-      external_id: recordId(data.external_id),
+      ...setupValue(
+        () => ({
+          dataset_id: datasetId(data.dataset_id),
+          run_id: datasetId(data.id),
+          external_id: recordId(data.external_id),
+        }),
+        "dataset_response_invalid",
+      ),
       credits_consumed: 0,
     };
   }
-  return { ...datasetProjection(data), credits_consumed: 0 };
+  return {
+    ...setupValue(() => datasetProjection(data), "dataset_response_invalid"),
+    credits_consumed: 0,
+  };
 }

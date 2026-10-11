@@ -1,6 +1,5 @@
 import type {
   IAuthenticateGeneric,
-  ICredentialTestRequest,
   ICredentialType,
   Icon,
   INodeProperties,
@@ -45,14 +44,6 @@ export class GuardfulAIApi implements ICredentialType {
       headers: {
         Authorization: "=Bearer {{$credentials.apiKey}}",
       },
-    },
-  };
-
-  test: ICredentialTestRequest = {
-    request: {
-      baseURL: "={{$credentials.serviceOrigin}}",
-      url: "/v1/auth/test",
-      method: "GET",
     },
   };
 }

@@ -22,6 +22,18 @@ const result = {
   runtime_bundle: "synthetic",
   usage: { credits: 1 },
   replayed: false,
+  input: {
+    content: "synthetic",
+    context: "",
+    direction: "input",
+    structured_fields: null,
+  },
+  input_state: "available",
+  input_retention: {
+    status: "retained",
+    retention_days: 7,
+    expires_at: "2026-10-18T00:00:00Z",
+  },
 };
 function host(
   request,
@@ -44,7 +56,9 @@ function host(
     }),
     getNodeParameter: (name, index, fallback) =>
       Object.hasOwn(params, name)
-        ? params[name]
+        ? typeof params[name] === "function"
+          ? params[name](index)
+          : params[name]
         : ({
             operation: "checkContent",
             scanPolicy: { mode: "list", value: `${policy}::2` },
@@ -77,7 +91,11 @@ test("credentials and node declarations retain public identities and protected A
     credential.properties.find((p) => p.name === "serviceOrigin").default,
     "https://www.guardfulai.com",
   );
-  assert.equal(credential.test.request.url, "/v1/auth/test");
+  assert.equal(
+    node.description.credentials[0].testedBy,
+    "testGuardfulAICredential",
+  );
+  assert.equal(credential.test, undefined);
   assert.deepEqual(
     parsePolicySelection({ mode: "id", value: `${policy}::2` }),
     { policyId: policy, policyVersion: 2 },
@@ -94,12 +112,20 @@ test("policy locator lists priced pinned versions and filters by name", async ()
       processing_mode: "local_only",
       pricing_version: "test",
     },
-    { id: policy, name: "Unavailable", credits_per_short_scan: null },
+    {
+      current_version: 2,
+      direction: "input",
+      processing_mode: "local_only",
+      pricing_version: "test",
+      id: policy,
+      name: "Unavailable",
+      credits_per_short_scan: null,
+    },
   ];
   let requested;
   const context = host(async (options) => {
     requested = options;
-    return entries;
+    return { statusCode: 200, body: entries };
   });
   const options = await context.node.methods.listSearch.getScanPolicies.call(
     context,
@@ -116,7 +142,27 @@ test("all output modes retain identity and routing; simplified is bounded", () =
     extra: "not selectable",
     findings: [{ code: "synthetic" }],
   };
-  assert.equal(Object.keys(selectOutput(value, "simplified", [])).length, 10);
+  assert.deepEqual(Object.keys(selectOutput(value, "simplified", [])), [
+    "scan_id",
+    "status",
+    "decision",
+    "safe_to_continue",
+    "scan_policy_version",
+    "flagged",
+    "redacted",
+    "redacted_content",
+    "replayed",
+    "usage",
+  ]);
+  for (const mode of ["raw", "selected"]) {
+    const out = selectOutput(value, mode, [
+      "input",
+      "input_state",
+      "input_retention",
+    ]);
+    for (const field of ["input", "input_state", "input_retention"])
+      assert.deepEqual(out[field], value[field]);
+  }
   for (const mode of ["simplified", "raw", "selected"]) {
     const out = selectOutput(value, mode, ["findings"]);
     for (const key of ["scan_id", "status", "decision", "safe_to_continue"])
@@ -277,3 +323,374 @@ for (const params of [
     assert.equal(out.json.status, "error");
   });
 }
+
+test("Options exposes scan controls only for Check Content", () => {
+  const properties = new Guardfulai().description.properties;
+  assert.equal(properties[0].name, "operation");
+  assert.equal(
+    properties.some((p) =>
+      ["inputRetentionDays", "includeInput"].includes(p.name),
+    ),
+    false,
+  );
+  const options = properties.find((p) => p.name === "options");
+  assert.equal(options.type, "collection");
+  for (const operation of [
+    "checkContent",
+    "listDatasets",
+    "createDataset",
+    "createDatasetRun",
+  ])
+    assert.equal(
+      options.displayOptions.show.operation.includes(operation),
+      operation === "checkContent",
+    );
+  assert.deepEqual(options.default, {});
+  assert.deepEqual(
+    options.options.map((p) => [p.name, p.default]),
+    [
+      ["inputRetentionDays", -1],
+      ["includeInput", "default"],
+    ],
+  );
+});
+
+for (const retention of [undefined, -1, 0, 1, 7, 30]) {
+  for (const visibility of [undefined, "default", "true", "false"]) {
+    test(`Options retention ${retention} and visibility ${visibility} preserve request defaults`, async () => {
+      let sent;
+      const context = host(
+        async (options) => {
+          sent = options;
+          return { statusCode: 200, body: result };
+        },
+        {
+          options: { inputRetentionDays: retention, includeInput: visibility },
+        },
+      );
+      const [[out]] = await context.node.execute.call(context);
+      assert.equal(
+        sent.body.input_retention_days,
+        retention === -1 ? undefined : retention,
+      );
+      assert.equal(
+        sent.body.include_input,
+        visibility === undefined || visibility === "default"
+          ? undefined
+          : visibility === "true",
+      );
+      assert.equal(Object.hasOwn(out.json, "input"), false);
+      assert.equal(Object.keys(out.json).length, 10);
+    });
+  }
+}
+
+test("Options expressions are evaluated once for each input item", async () => {
+  const sent = [];
+  const context = host(
+    async (options) => {
+      sent.push(options.body);
+      return { statusCode: 200, body: result };
+    },
+    {
+      options: (index) => ({
+        inputRetentionDays: index === 0 ? 0 : 30,
+        includeInput: index === 0 ? "false" : "true",
+      }),
+    },
+    [{ json: {} }, { json: {} }],
+  );
+  const [output] = await context.node.execute.call(context);
+  assert.deepEqual(
+    sent.map((body) => [body.input_retention_days, body.include_input]),
+    [
+      [0, false],
+      [30, true],
+    ],
+  );
+  assert.deepEqual(
+    output.map((item) => item.pairedItem),
+    [{ item: 0 }, { item: 1 }],
+  );
+});
+
+for (const visibility of [undefined, "default", "false", "true"]) {
+  test(`Selected Original Input requests input unless hidden: ${visibility}`, async () => {
+    let sent;
+    const context = host(
+      async (options) => {
+        sent = options.body;
+        const body = { ...result };
+        if (options.body.include_input === false) {
+          delete body.input;
+          body.input_state = "hidden";
+        }
+        return { statusCode: 200, body };
+      },
+      {
+        output: "selected",
+        outputFields: ["input", "input_state", "input_retention"],
+        options: { includeInput: visibility, inputRetentionDays: 0 },
+      },
+    );
+    const [[out]] = await context.node.execute.call(context);
+    assert.equal(sent.include_input, visibility !== "false");
+    assert.equal(sent.input_retention_days, 0);
+    assert.equal(Object.hasOwn(out.json, "input"), visibility !== "false");
+  });
+}
+
+for (const options of [
+  { inputRetentionDays: 2 },
+  { includeInput: "not-a-choice" },
+]) {
+  test("invalid Options stop before a consuming request", async () => {
+    let calls = 0;
+    const context = host(
+      async () => {
+        calls++;
+      },
+      { options },
+      undefined,
+      true,
+    );
+    const [[out]] = await context.node.execute.call(context);
+    assert.equal(calls, 0);
+    assert.equal(out.json.safe_to_continue, false);
+    assert.match(out.json.guardfulai_error.description, /Choose/);
+  });
+}
+
+for (const [statusCode, code, recovery] of [
+  [401, "invalid_api_key", /Replace the API key/],
+  [403, "scope_denied", /allowed operations/],
+  [403, "scope_required", /allowed operations/],
+  [
+    403,
+    "dataset_management_requires_unrestricted_policy",
+    /unrestricted policy/,
+  ],
+  [402, "insufficient_credits", /Usage/],
+  [404, "scan_policy_not_found", /Refresh 'Scan Policy'/],
+  [503, "runtime_unavailable", /connectivity from the n8n host/],
+]) {
+  for (const continued of [false, true]) {
+    test(`scan ${code} has safe recovery copy with continue=${continued}`, async () => {
+      const context = host(
+        async () => ({
+          statusCode,
+          body: { code, retryable: false, message: "PRIVATE_CONTENT" },
+        }),
+        {},
+        [{ json: { decision: "allow", content: "PRIVATE_CONTENT" } }],
+        continued,
+      );
+      if (continued) {
+        const [[out]] = await context.node.execute.call(context);
+        assert.equal(out.json.guardfulai_error.code, code);
+        assert.match(out.json.guardfulai_error.description, recovery);
+        assert.equal(out.json.safe_to_continue, false);
+        assert.equal(JSON.stringify(out).includes("PRIVATE_CONTENT"), false);
+      } else {
+        await assert.rejects(context.node.execute.call(context), (error) => {
+          assert.match(error.description, recovery);
+          assert.equal(
+            JSON.stringify(error).includes("PRIVATE_CONTENT"),
+            false,
+          );
+          assert.equal(error.context.itemIndex, 0);
+          return true;
+        });
+      }
+    });
+  }
+}
+
+for (const response of [
+  { statusCode: 401, body: "PRIVATE_CONTENT" },
+  {
+    statusCode: 403,
+    body: { code: "PRIVATE_CONTENT", message: "PRIVATE_CONTENT" },
+  },
+  { statusCode: 500, body: { code: "__proto__", message: "PRIVATE_CONTENT" } },
+  { statusCode: 500, body: { code: "PRIVATE_CONTENT" } },
+]) {
+  test("hostile or malformed scan errors never escape", async () => {
+    const context = host(async () => response, {}, undefined, true);
+    const [[out]] = await context.node.execute.call(context);
+    assert.equal(JSON.stringify(out).includes("PRIVATE_CONTENT"), false);
+    assert.equal(out.json.guardfulai_error.code, "integration_transport_error");
+    assert.equal(out.json.safe_to_continue, false);
+  });
+}
+
+test("credential testing uses auth/test and sanitizes transport and service details", async () => {
+  const node = new Guardfulai();
+  let request;
+  const credential = {
+    id: "synthetic",
+    name: "synthetic",
+    type: "guardfulaiApi",
+    data: {
+      serviceOrigin: "https://service.example.test",
+      apiKey: "PRIVATE_KEY",
+    },
+  };
+  const run = async (response) =>
+    node.methods.credentialTest.testGuardfulAICredential.call(
+      {
+        helpers: {
+          request: async (options) => {
+            request = options;
+            if (response instanceof Error) throw response;
+            return response;
+          },
+        },
+      },
+      credential,
+    );
+  const success = await run({ statusCode: 200, body: { authenticated: true } });
+  assert.equal(success.status, "OK");
+  assert.equal(request.uri, "https://service.example.test/v1/auth/test");
+  assert.equal(request.timeout, 30000);
+  assert.equal(request.headers.Authorization, "Bearer PRIVATE_KEY");
+  for (const response of [
+    {
+      statusCode: 401,
+      body: { code: "invalid_api_key", message: "PRIVATE_KEY" },
+    },
+    { statusCode: 403, body: { code: "scope_denied", message: "PRIVATE_KEY" } },
+    { statusCode: 200, body: "PRIVATE_KEY" },
+    new Error("PRIVATE_KEY"),
+  ]) {
+    const outcome = await run(response);
+    assert.equal(outcome.status, "Error");
+    assert.equal(JSON.stringify(outcome).includes("PRIVATE_KEY"), false);
+    assert.match(
+      outcome.message,
+      /Replace|allowed operations|support|connectivity/,
+    );
+  }
+});
+
+for (const response of [
+  {
+    statusCode: 401,
+    body: { code: "invalid_api_key", message: "PRIVATE_CONTENT" },
+  },
+  { statusCode: 200, body: "PRIVATE_CONTENT" },
+  new Error("PRIVATE_CONTENT"),
+]) {
+  test("policy discovery uses the same sanitized presenter", async () => {
+    const context = host(async () => {
+      if (response instanceof Error) throw response;
+      return response;
+    });
+    await assert.rejects(
+      context.node.methods.listSearch.getScanPolicies.call(context),
+      (error) => {
+        assert.ok(error.description);
+        assert.equal(JSON.stringify(error).includes("PRIVATE_CONTENT"), false);
+        return true;
+      },
+    );
+  });
+}
+
+for (const response of [
+  {
+    statusCode: 403,
+    body: { code: "scope_denied", message: "PRIVATE_CONTENT" },
+  },
+  { statusCode: 500, body: { code: "PRIVATE_CONTENT" } },
+  new Error("PRIVATE_CONTENT"),
+]) {
+  test("dataset setup gives safe recovery without automatic create retries", async () => {
+    let calls = 0;
+    const context = host(
+      async () => {
+        calls++;
+        if (response instanceof Error) throw response;
+        return response;
+      },
+      { operation: "createDataset", datasetName: "Synthetic dataset" },
+    );
+    await assert.rejects(context.node.execute.call(context), (error) => {
+      assert.match(error.description, /datasets|List Datasets/);
+      assert.equal(JSON.stringify(error).includes("PRIVATE_CONTENT"), false);
+      return true;
+    });
+    assert.equal(calls, 1);
+  });
+}
+
+test("credential retrieval, origin validation and local mappings have safe explanations", async () => {
+  for (const params of [
+    { scanPolicy: "bad" },
+    { structuredFields: "PRIVATE_CONTENT" },
+    { concurrency: 0 },
+  ]) {
+    const context = host(async () => {
+      throw new Error("must not dispatch");
+    }, params);
+    await assert.rejects(context.node.execute.call(context), (error) => {
+      assert.ok(error.description);
+      assert.equal(JSON.stringify(error).includes("PRIVATE_CONTENT"), false);
+      return true;
+    });
+  }
+  const context = host(async () => {});
+  context.getCredentials = async () => {
+    throw new Error("PRIVATE_KEY");
+  };
+  await assert.rejects(context.node.execute.call(context), (error) => {
+    assert.match(error.description, /Replace the API key/);
+    assert.equal(JSON.stringify(error).includes("PRIVATE_KEY"), false);
+    return true;
+  });
+});
+
+for (const [params, parameter] of [
+  [{ operation: "createDataset", datasetName: "" }, "Dataset Name"],
+  [
+    { operation: "createDatasetRun", datasetId: "bad", runIdentity: "batch-1" },
+    "Dataset ID",
+  ],
+  [
+    {
+      operation: "createDatasetRun",
+      datasetId: policy,
+      runIdentity: "bad value",
+    },
+    "Run Identity",
+  ],
+  [{ operation: "listDatasets", datasetPage: 0 }, "Page"],
+]) {
+  test(`invalid dataset setup identifies ${parameter} before dispatch`, async () => {
+    let calls = 0;
+    const context = host(async () => {
+      calls++;
+    }, params);
+    await assert.rejects(context.node.execute.call(context), (error) => {
+      assert.ok(error.message.includes(parameter));
+      assert.ok(error.description);
+      return true;
+    });
+    assert.equal(calls, 0);
+  });
+}
+
+test("malformed dataset projection directs users to support, not input mappings", async () => {
+  const context = host(
+    async () => ({
+      statusCode: 200,
+      body: { datasets: [{ id: "bad", name: "PRIVATE_CONTENT" }], total: 1 },
+    }),
+    { operation: "listDatasets" },
+  );
+  await assert.rejects(context.node.execute.call(context), (error) => {
+    assert.match(error.description, /support/);
+    assert.equal(JSON.stringify(error).includes("PRIVATE_CONTENT"), false);
+    return true;
+  });
+});

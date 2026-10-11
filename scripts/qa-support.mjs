@@ -152,22 +152,84 @@ export async function freePort(preferred, exact = false) {
 }
 export async function startStub(port) {
   const server = createServer((req, res) => {
-    req.resume();
     const key = req.headers.authorization;
+    if (key === "Bearer qa-output" && req.url === "/v1/check") {
+      let text = "";
+      req.on("data", (chunk) => {
+        text += chunk;
+      });
+      req.on("end", () => {
+        const body = JSON.parse(text);
+        const days = body.input_retention_days ?? 7;
+        const visible = body.include_input !== false;
+        res.setHeader("Content-Type", "application/json");
+        res.end(
+          JSON.stringify({
+            schema_version: 1,
+            scan_id: "00000000-0000-4000-8000-000000000101",
+            status: "completed",
+            decision: "allow",
+            safe_to_continue: true,
+            flagged: false,
+            redacted: false,
+            redacted_content: null,
+            checks_run: [],
+            findings: [],
+            scan_policy_version: body.scan_policy_version,
+            runtime_bundle: "synthetic",
+            usage: { credits: 0 },
+            replayed: false,
+            input_state: visible ? "available" : "hidden",
+            input_retention: {
+              status: days === 0 ? "not_retained" : "retained",
+              retention_days: days,
+              expires_at: days === 0 ? null : "2099-01-01T00:00:00Z",
+            },
+            ...(visible
+              ? {
+                  input: {
+                    content: body.content,
+                    direction: body.direction,
+                    context: "",
+                    structured_fields: null,
+                  },
+                }
+              : {}),
+          }),
+        );
+      });
+      return;
+    }
+    req.resume();
     if (key === "Bearer qa-transport") return req.socket.destroy();
     res.setHeader("Content-Type", "application/json");
     if (req.url === "/v1/auth/test") {
-      res.end(JSON.stringify({ status: "ok" }));
+      if (
+        key === "Bearer qa-credential-auth" ||
+        key === "Bearer qa-credential-scope"
+      ) {
+        res.statusCode = key === "Bearer qa-credential-auth" ? 401 : 403;
+        res.end(
+          JSON.stringify({
+            code: res.statusCode === 401 ? "invalid_api_key" : "scope_denied",
+            message: "PRIVATE_QA_DETAIL",
+          }),
+        );
+      } else {
+        res.end(JSON.stringify({ authenticated: true }));
+      }
       return;
     }
-    const conflict = key === "Bearer qa-conflict";
-    res.statusCode = conflict ? 409 : 401;
+    const [status, code] = {
+      "Bearer qa-conflict": [409, "idempotency_conflict"],
+      "Bearer qa-scope": [403, "scope_denied"],
+      "Bearer qa-credits": [402, "insufficient_credits"],
+      "Bearer qa-policy": [404, "scan_policy_not_found"],
+      "Bearer qa-hostile": [500, "PRIVATE_QA_DETAIL"],
+    }[key] ?? [401, "invalid_api_key"];
+    res.statusCode = status;
     res.end(
-      JSON.stringify({
-        code: conflict ? "idempotency_conflict" : "invalid_api_key",
-        message: "Synthetic QA error",
-        retryable: false,
-      }),
+      JSON.stringify({ code, message: "PRIVATE_QA_DETAIL", retryable: false }),
     );
   });
   await new Promise((accept, reject) => {

@@ -1,3 +1,5 @@
+import { GuardfulAIContractError } from "./errors";
+
 const core = ["scan_id", "status", "decision", "safe_to_continue"];
 const simplified = [
   ...core,
@@ -5,9 +7,6 @@ const simplified = [
   "flagged",
   "redacted",
   "redacted_content",
-  "input",
-  "input_state",
-  "input_retention",
   "replayed",
   "usage",
 ];
@@ -29,7 +28,7 @@ export const OUTPUT_FIELDS = [
 ];
 export function validateOutputOptions(mode: unknown, fields: unknown): void {
   if (mode !== "raw" && mode !== "simplified" && mode !== "selected")
-    throw new Error("output_mode_invalid");
+    throw new GuardfulAIContractError("output_mode_invalid");
   if (
     mode === "selected" &&
     (!Array.isArray(fields) ||
@@ -37,7 +36,7 @@ export function validateOutputOptions(mode: unknown, fields: unknown): void {
         (field) => !OUTPUT_FIELDS.some((option) => option.value === field),
       ))
   )
-    throw new Error("output_fields_invalid");
+    throw new GuardfulAIContractError("output_fields_invalid");
 }
 export function selectOutput(
   result: Record<string, unknown>,
