@@ -41,6 +41,30 @@ export class Guardfulai implements INodeType {
     credentials: [{ name: "guardfulaiApi", required: true }],
     properties: [
       {
+        displayName: "Input Retention",
+        name: "inputRetentionDays",
+        type: "options",
+        default: -1,
+        options: [
+          { name: "1 Day", value: 1 },
+          { name: "30 Days", value: 30 },
+          { name: "7 Days", value: 7 },
+          { name: "None", value: 0 },
+          { name: "Organization Default", value: -1 },
+        ],
+      },
+      {
+        displayName: "Original Input in Output",
+        name: "includeInput",
+        type: "options",
+        default: "default",
+        options: [
+          { name: "Organization Default", value: "default" },
+          { name: "Show", value: "true" },
+          { name: "Hide", value: "false" },
+        ],
+      },
+      {
         displayName: "Operation",
         name: "operation",
         type: "options",
@@ -392,6 +416,22 @@ export class Guardfulai implements INodeType {
             policyId,
             policyVersion,
             returnRedactedContent,
+            inputRetentionDays:
+              this.getNodeParameter("inputRetentionDays", itemIndex, -1) === -1
+                ? undefined
+                : (this.getNodeParameter(
+                    "inputRetentionDays",
+                    itemIndex,
+                  ) as number),
+            includeInput:
+              this.getNodeParameter("includeInput", itemIndex, "default") ===
+              "default"
+                ? outputMode === "selected" &&
+                  Array.isArray(outputFields) &&
+                  outputFields.includes("input")
+                  ? true
+                  : undefined
+                : this.getNodeParameter("includeInput", itemIndex) === "true",
             reporting: this.getNodeParameter(
               "reporting",
               itemIndex,

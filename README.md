@@ -176,3 +176,7 @@ configuration; future publishing uses OIDC. No publication settings are configur
 Use [Guardful AI help](https://www.guardfulai.com/help/) for service questions and the
 intended public repository's issues after it is created for node-specific problems.
 Report sanitized error codes and versions; never share keys or request content.
+
+## Input retention
+
+New checks inherit the organization input retention (seven days by default) and original-input visibility. The node can choose no retention, one, seven, or thirty days and explicitly show or hide input. Available input and retention status are included in simplified and raw outputs; selected output exposes these as optional fields. Retention failures do not change the check decision. n8n execution history has its own retention settings.

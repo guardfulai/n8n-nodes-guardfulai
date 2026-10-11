@@ -182,3 +182,57 @@ test("bounded execution preserves item order and never exceeds concurrency", asy
   assert.equal(maximum, 2);
   assert.deepEqual(output, [8, 6, 4, 2, 0]);
 });
+
+test("retention and visibility inherit or explicitly override without changing retry identity", async () => {
+  for (const days of [undefined, 0, 1, 7, 30]) {
+    let sent;
+    const chosen = { ...input, inputRetentionDays: days, includeInput: false };
+    await checkContent(async (request) => {
+      sent = request;
+      return success;
+    }, chosen);
+    assert.equal(sent.body.input_retention_days, days);
+    assert.equal(sent.body.include_input, false);
+    assert.equal(stableRetryKey(chosen), stableRetryKey(input));
+  }
+});
+
+test("authorized input survives simplified raw and selected outputs; hidden input stays absent", async () => {
+  const { selectOutput } = await import("../dist/nodes/GuardfulAI/output.js");
+  const original = {
+    content: "synthetic 世界",
+    context: "synthetic context",
+    direction: "input",
+    structured_fields: { tier: 2 },
+  };
+  const result = await checkContent(
+    async () => ({
+      ...success,
+      body: {
+        ...success.body,
+        input: original,
+        input_state: "available",
+        input_retention: {
+          status: "retained",
+          retention_days: 7,
+          expires_at: "2026-10-18T00:00:00Z",
+        },
+      },
+    }),
+    input,
+  );
+  for (const mode of ["simplified", "raw", "selected"])
+    assert.deepEqual(selectOutput(result, mode, ["input"]).input, original);
+  const hidden = await checkContent(
+    async () => ({
+      ...success,
+      body: { ...success.body, input_state: "hidden" },
+    }),
+    input,
+  );
+  assert.equal(
+    Object.hasOwn(selectOutput(hidden, "simplified", []), "input"),
+    false,
+  );
+  assert.equal(result.safe_to_continue, false);
+});

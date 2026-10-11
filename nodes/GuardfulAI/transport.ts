@@ -24,6 +24,8 @@ export interface CheckInput {
   policyId: string;
   policyVersion: number;
   returnRedactedContent: boolean;
+  inputRetentionDays?: number;
+  includeInput?: boolean;
   reporting?: ReportingContext | string;
 }
 
@@ -275,6 +277,36 @@ function semanticOutput(
   };
 }
 
+function inputOutput(result: JsonObject): JsonObject {
+  const output: JsonObject = {};
+  if (result.input !== undefined) {
+    const input = record(result.input);
+    if (
+      typeof input.content !== "string" ||
+      input.content.length > 20000 ||
+      !["input", "output"].includes(String(input.direction))
+    )
+      failContract("invalid_input_result");
+    output.input = input;
+  }
+  if (result.input_state !== undefined) {
+    if (
+      ![
+        "available",
+        "hidden",
+        "not_retained",
+        "expired",
+        "unavailable",
+      ].includes(String(result.input_state))
+    )
+      failContract("invalid_input_result");
+    output.input_state = result.input_state;
+  }
+  if (result.input_retention !== undefined)
+    output.input_retention = record(result.input_retention);
+  return output;
+}
+
 function projectOutput(body: unknown): JsonObject {
   const result = record(body);
   if (
@@ -342,6 +374,7 @@ function projectOutput(body: unknown): JsonObject {
     flagged: result.flagged,
     redacted: result.redacted,
     redacted_content: result.redacted_content ?? null,
+    ...inputOutput(result),
     check_summaries: checkSummaries,
     findings,
     ...semanticOutput(result, findings),
@@ -387,6 +420,13 @@ export async function checkContent(
     external_id: input.eventId.slice(0, 64),
     return_redacted_content: input.returnRedactedContent,
   };
+  if (input.inputRetentionDays !== undefined) {
+    if (![0, 1, 7, 30].includes(input.inputRetentionDays))
+      throw new TypeError("input_retention_invalid");
+    payload.input_retention_days = input.inputRetentionDays;
+  }
+  if (input.includeInput !== undefined)
+    payload.include_input = input.includeInput;
   if (input.context) payload.context = input.context;
   const fields = parseStructuredFields(input.structuredFields);
   if (fields !== undefined) payload.structured_fields = fields;

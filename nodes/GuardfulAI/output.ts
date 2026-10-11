@@ -5,10 +5,16 @@ const simplified = [
   "flagged",
   "redacted",
   "redacted_content",
+  "input",
+  "input_state",
+  "input_retention",
   "replayed",
   "usage",
 ];
 export const OUTPUT_FIELDS = [
+  { name: "Original Input", value: "input" },
+  { name: "Input Availability", value: "input_state" },
+  { name: "Input Retention", value: "input_retention" },
   { name: "Check Summaries", value: "check_summaries" },
   { name: "Findings", value: "findings" },
   { name: "Flagged", value: "flagged" },
