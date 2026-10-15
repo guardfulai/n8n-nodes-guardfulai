@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-guardfulai",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Check content and prepare dataset reporting with Guardful AI",
   "license": "MIT",
   "homepage": "https://www.guardfulai.com/integrations/n8n/",
