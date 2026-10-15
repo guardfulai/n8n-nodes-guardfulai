@@ -181,6 +181,7 @@ test("multiple input items preserve pairing and enforce authenticated timeout", 
   const seen = [];
   const context = host(
     async (options) => {
+      if (options.url.endsWith('/v1/dataset-runs')) return { statusCode: 200, body: { dataset_id: '00000000-0000-4000-8000-000000000002', run_id: '00000000-0000-4000-8000-000000000003', dataset_name: 'Batch', report_url: '/app/datasets/00000000-0000-4000-8000-000000000002/?run_id=00000000-0000-4000-8000-000000000003' } };
       seen.push(options);
       return { statusCode: 200, body: result };
     },
@@ -389,6 +390,7 @@ test("Options expressions are evaluated once for each input item", async () => {
   const sent = [];
   const context = host(
     async (options) => {
+      if (options.url.endsWith('/v1/dataset-runs')) return { statusCode: 200, body: { dataset_id: '00000000-0000-4000-8000-000000000002', run_id: '00000000-0000-4000-8000-000000000003', dataset_name: 'Batch', report_url: '/app/datasets/00000000-0000-4000-8000-000000000002/?run_id=00000000-0000-4000-8000-000000000003' } };
       sent.push(options.body);
       return { statusCode: 200, body: result };
     },
@@ -693,4 +695,47 @@ test("malformed dataset projection directs users to support, not input mappings"
     assert.equal(JSON.stringify(error).includes("PRIVATE_CONTENT"), false);
     return true;
   });
+});
+
+test("batch destination is set up once and conflicting reporting is rejected before checks", async () => {
+  const seen = [];
+  const receipt = { dataset_id: '00000000-0000-4000-8000-000000000002', run_id: '00000000-0000-4000-8000-000000000003', dataset_name: 'Batch', report_url: '/app/datasets/00000000-0000-4000-8000-000000000002/?run_id=00000000-0000-4000-8000-000000000003' };
+  const context = host(async options => { seen.push(options); return { statusCode: 200, body: options.url.endsWith('/v1/dataset-runs') ? receipt : result }; }, {}, [{ json: {} }, { json: {} }]);
+  const [output] = await context.node.execute.call(context);
+  assert.equal(seen.filter(o => o.url.endsWith('/v1/dataset-runs')).length, 1);
+  assert.equal(seen[0].body.destination.mode, 'new');
+  assert.equal(seen[0].body.expected_records, 2);
+  assert.ok(seen.slice(1).every(o => o.body.reporting.run_id === receipt.run_id));
+  assert.ok(output.every(o => o.json.report_url === 'https://service.example.test' + receipt.report_url));
+  const retry = await context.node.execute.call(context);
+  assert.equal(seen[3].body.external_id, seen[0].body.external_id);
+  assert.equal(retry[0][0].json.run_id, receipt.run_id);
+  const conflict = host(async () => { throw new Error('must not execute'); }, { reporting: index => JSON.stringify({ dataset_id: index ? '00000000-0000-4000-8000-000000000004' : receipt.dataset_id, record_id: 'row:' + index }) }, [{json: {}}, {json: {}}]);
+  await assert.rejects(conflict.node.execute.call(conflict), /dataset_destination_conflict/);
+});
+
+for (const mode of ["new", "existing", "standalone"]) test(`setup action exposes ${mode} destination and clickable report`, async () => {
+  const dataset = "00000000-0000-4000-8000-000000000401";
+  const run = "00000000-0000-4000-8000-000000000402";
+  const calls = [];
+  const result = await new Guardfulai().execute.call(host(async options => {
+    calls.push(options);
+    return { statusCode: 200, body: { dataset_id: dataset, run_id: run, dataset_name: "Batch", report_url: `/app/datasets/${dataset}/?run_id=${run}` } };
+  }, { operation: "setupDatasetRun", datasetDestination: mode, batchDataset: { value: dataset }, runIdentity: "batch-1", expectedRecords: 2 }));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.destination.mode, mode);
+  assert.equal(calls[0].body.expected_records, 2);
+  assert.equal(result[0][0].json.report_url, `https://service.example.test/app/datasets/${dataset}/?run_id=${run}`);
+});
+
+test("failed batch records keep their reporting link", async () => {
+  const dataset = "00000000-0000-4000-8000-000000000401";
+  const run = "00000000-0000-4000-8000-000000000402";
+  const report = `/app/datasets/${dataset}/?run_id=${run}`;
+  const request = async options => options.url.endsWith("/v1/dataset-runs") ? { statusCode: 200, body: { dataset_id: dataset, run_id: run, dataset_name: "Batch", report_url: report } } : { statusCode: 402, body: { code: "insufficient_credits", retryable: false } };
+  const context = host(request, {}, [{ json: {} }, { json: {} }], true);
+  const [output] = await context.node.execute.call(context);
+  assert.ok(output.every(item => item.json.status === "error" && item.json.report_url === "https://service.example.test" + report));
+  const stop = host(request, {}, [{ json: {} }, { json: {} }]);
+  await assert.rejects(stop.node.execute.call(stop), error => { assert.ok(error.description.includes(report)); return true; });
 });

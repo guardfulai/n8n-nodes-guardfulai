@@ -113,6 +113,11 @@ for (const [group, codes] of Object.entries({
 }
 
 const parameters: Record<string, [string, string]> = {
+  dataset_destination_conflict: ["Dataset", "Use one dataset and run for every item. Remove conflicting per-item reporting before retrying."],
+  dataset_destination_invalid: ["Dataset", "Choose New Dataset, Existing Dataset or Standalone Scans."],
+  dataset_count_invalid: ["Number of Records", "Use a whole number from 0 through 50000."],
+  dataset_archived: ["Dataset", "Select an active dataset or create a new dataset."],
+  dataset_run_identity_conflict: ["Run Identity", "Keep the original dataset and options when retrying; use new source event IDs for a fresh run."],
   dataset_parameters_invalid: [
     "Dataset Name / Reporting Basis",
     "Enter a nonempty Dataset Name of at most 120 characters and choose Events or Latest Run for Reporting Basis.",

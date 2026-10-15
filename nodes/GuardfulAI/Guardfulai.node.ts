@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { datasetId, reportingContext } from "./reporting";
 import type {
   ICredentialTestFunctions,
   ICredentialsDecrypted,
@@ -70,28 +72,32 @@ export class Guardfulai implements INodeType {
         type: "options",
         noDataExpression: true,
         options: [
-          {
-            name: "Check Content",
-            value: "checkContent",
-            action: "Check content",
-          },
-          {
-            name: "List Datasets",
-            value: "listDatasets",
-            action: "List datasets",
-          },
-          {
-            name: "Create Dataset",
-            value: "createDataset",
-            action: "Create a dataset",
-          },
-          {
-            name: "Create Dataset Run",
-            value: "createDatasetRun",
-            action: "Create or recover a dataset run",
-          },
+          { name: "Check Content", value: "checkContent", action: "Check content" },
+          { name: "Create Dataset", value: "createDataset", action: "Create a dataset" },
+          { name: "Create Dataset Run", value: "createDatasetRun", action: "Create or recover a dataset run" },
+          { name: "List Datasets", value: "listDatasets", action: "List datasets" },
+          { name: "Set Up Batch Dataset", value: "setupDatasetRun", action: "Set up a batch dataset" },
         ],
         default: "checkContent",
+      },
+      {
+        displayName: "Dataset", name: "datasetDestination", type: "options", default: "new",
+        displayOptions: { show: { operation: ["checkContent", "setupDatasetRun"] } },
+        options: [{ name: "New Dataset", value: "new" }, { name: "Existing Dataset", value: "existing" }, { name: "Standalone Scans", value: "standalone" }],
+        description: 'Destination for multi-record executions. Explicit reporting contexts retain their selected destination.',
+      },
+      {
+        displayName: "New Dataset Name", name: "batchDatasetName", type: "string", default: "",
+        displayOptions: { show: { operation: ["checkContent", "setupDatasetRun"], datasetDestination: ["new"] } },
+        description: 'Leave blank for a dated name. Reuse the same name on retry.',
+      },
+      {
+        displayName: "Existing Dataset", name: "batchDataset", type: "resourceLocator", default: { mode: "list", value: "" },
+        displayOptions: { show: { operation: ["checkContent", "setupDatasetRun"], datasetDestination: ["existing"] } },
+        modes: [
+          { displayName: "From List", name: "list", type: "list", typeOptions: { searchListMethod: "getDatasets", searchable: true } },
+          { displayName: "By ID", name: "id", type: "string" },
+        ],
       },
       {
         displayName: "Scan Policy",
@@ -314,10 +320,11 @@ export class Guardfulai implements INodeType {
         type: "string",
         default: "",
         required: true,
-        displayOptions: { show: { operation: ["createDatasetRun"] } },
+        displayOptions: { show: { operation: ["createDatasetRun", "setupDatasetRun"] } },
         description:
           "Stable opaque batch ID. Reuse on retry; use a new ID for an intentional new snapshot.",
       },
+      { displayName: "Expected Records", name: "expectedRecords", type: "number", default: 0, typeOptions: { minValue: 0, maxValue: 50000 }, displayOptions: { show: { operation: ["setupDatasetRun"] } }, description: "Number of non-empty records in this batch" },
       {
         displayName: "Page",
         name: "datasetPage",
@@ -375,6 +382,23 @@ export class Guardfulai implements INodeType {
       },
     },
     listSearch: {
+      async getDatasets(this: ILoadOptionsFunctions, filter?: string, paginationToken?: string): Promise<INodeListSearchResult> {
+        const credentials = await this.getCredentials("guardfulaiApi");
+        const origin = normalizeOrigin(credentials.serviceOrigin);
+        const page = Number(paginationToken || "1");
+        if (!Number.isSafeInteger(page) || page < 1 || page > 100000) throw contractError("dataset_page_invalid");
+        const response = await this.helpers.httpRequestWithAuthentication.call(this, "guardfulaiApi", {
+          method: "GET", url: `${origin}/v1/datasets?page=${page}&page_size=50&search=${encodeURIComponent((filter || "").slice(0, 120))}`,
+          json: true, returnFullResponse: true, ignoreHttpStatusErrors: true, timeout: REQUEST_TIMEOUT_MS,
+        }) as HttpResponse;
+        if (response.statusCode !== 200) throw requestError(response);
+        const body = response.body as { datasets: { id: string; name: string }[]; total: number };
+        if (!body || !Array.isArray(body.datasets) || body.datasets.length > 50 || !Number.isSafeInteger(body.total)) throw contractError("dataset_response_invalid");
+        return { results: body.datasets.map(row => {
+          if (typeof row.name !== "string") throw contractError("dataset_response_invalid");
+          return { name: row.name, value: datasetId(row.id) };
+        }), paginationToken: page * 50 < body.total ? String(page + 1) : undefined };
+      },
       async getScanPolicies(
         this: ILoadOptionsFunctions,
         filter?: string,
@@ -502,16 +526,41 @@ export class Guardfulai implements INodeType {
       try {
         const result = await datasetSetup(request, {
           operation,
-          name: this.getNodeParameter("datasetName", 0, "") as string,
+          name: this.getNodeParameter(operation === "setupDatasetRun" ? "batchDatasetName" : "datasetName", 0, "") as string,
           basis: this.getNodeParameter("reportingBasis", 0, "events") as string,
-          dataset: this.getNodeParameter("datasetId", 0, "") as string,
+          dataset: operation === "setupDatasetRun" ? (this.getNodeParameter("batchDataset", 0, { value: "" }) as { value: string }).value : this.getNodeParameter("datasetId", 0, "") as string,
+          destination: this.getNodeParameter("datasetDestination", 0, "new") as string,
+          expectedRecords: operation === "setupDatasetRun" ? this.getNodeParameter("expectedRecords", 0, 0) as number : undefined,
           externalId: this.getNodeParameter("runIdentity", 0, "") as string,
           page: this.getNodeParameter("datasetPage", 0, 1) as number,
         });
-        return [[{ json: result as IDataObject, pairedItem: { item: 0 } }]];
+        return [[{ json: { ...result, ...(result.report_url ? { report_url: `${origin}${result.report_url}` } : {}) } as IDataObject, pairedItem: { item: 0 } }]];
       } catch (error) {
         throw operationError(this.getNode(), error, 0, "dataset_setup_failed");
       }
+    }
+    const contexts = items.map((_item, index) => reportingContext(this.getNodeParameter("reporting", index, "")));
+    let batch: Record<string, unknown> | undefined;
+    const count = items.filter((_item, index) => String(this.getNodeParameter("content", index, "")).trim()).length;
+    if (count > 1) {
+      try {
+        const explicit = contexts.filter(value => value !== undefined);
+        if (explicit.length && (explicit.length !== contexts.length || explicit.some(value => value.dataset_id !== explicit[0].dataset_id || value.run_id !== explicit[0].run_id))) throw contractError("dataset_destination_conflict");
+        if (explicit[0]?.run_id) {
+          batch = { dataset_id: explicit[0].dataset_id, run_id: explicit[0].run_id, report_url: `/app/datasets/${explicit[0].dataset_id}/?run_id=${explicit[0].run_id}` };
+        } else {
+          const selection = this.getNodeParameter("batchDataset", 0, { value: "" }) as { value: string };
+          // Existing event IDs are the node's retry authority. Fresh event IDs
+          // identify a fresh batch; credentials and content never enter metadata.
+          const identity = createHash("sha256").update(JSON.stringify([this.getNode().id, items.map((_item, index) => this.getNodeParameter("eventId", index))])).digest("hex");
+          batch = await datasetSetup(request, {
+            operation: "setupDatasetRun", externalId: `n8n:${identity}`, expectedRecords: count,
+            destination: explicit[0] ? "existing" : this.getNodeParameter("datasetDestination", 0, "new") as string,
+            dataset: explicit[0]?.dataset_id || selection.value,
+            name: this.getNodeParameter("batchDatasetName", 0, "") as string,
+          });
+        }
+      } catch (error) { throw operationError(this.getNode(), error, undefined, "dataset_setup_failed"); }
     }
     const output = await runBounded(
       items,
@@ -579,14 +628,13 @@ export class Guardfulai implements INodeType {
                   ? true
                   : undefined
                 : visibility === "true",
-            reporting: this.getNodeParameter(
-              "reporting",
-              itemIndex,
-              "",
-            ) as string,
+            reporting: batch ? {
+              ...contexts[itemIndex], dataset_id: String(batch.dataset_id), run_id: String(batch.run_id),
+              record_id: contexts[itemIndex]?.record_id || `item:${itemIndex}`,
+            } : contexts[itemIndex],
           });
           return {
-            json: selectOutput(result, outputMode, outputFields) as IDataObject,
+            json: { ...selectOutput(result, outputMode, outputFields), ...(batch ? { dataset_id: batch.dataset_id, run_id: batch.run_id, dataset_name: batch.dataset_name, report_url: `${origin}${batch.report_url}` } : {}) } as IDataObject,
             pairedItem: { item: itemIndex },
           };
         } catch (error) {
@@ -597,9 +645,14 @@ export class Guardfulai implements INodeType {
                 status: "error",
                 safe_to_continue: false,
                 guardfulai_error: detail,
-              },
+                ...(batch ? { dataset_id: batch.dataset_id, run_id: batch.run_id, dataset_name: batch.dataset_name, report_url: `${origin}${batch.report_url}` } : {}),
+              } as IDataObject,
               pairedItem: { item: itemIndex },
             };
+          }
+          if (batch) {
+            const detail = presentError(error);
+            throw new NodeOperationError(this.getNode(), `${detail.message} (${detail.code})`, { description: `${detail.description} View dataset report: ${origin}${batch.report_url}`, itemIndex });
           }
           throw operationError(this.getNode(), error, itemIndex);
         }

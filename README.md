@@ -231,3 +231,9 @@ Release commands are not validation commands; do not publish locally.
 Use [Guardful AI help](https://www.guardfulai.com/help/) for service questions and
 [GitHub issues](https://github.com/guardfulai/n8n-nodes-guardfulai/issues) for node-specific
 problems. Report sanitized codes and versions; never share keys or request content.
+
+## Multi-item dataset destinations
+
+For Check Content, including redacted output, with more than one non-empty item, choose **Dataset**: **New dataset** (default), **Existing dataset**, or **Standalone scans**. Optionally edit the new dataset name, or search the existing-dataset selector. The node sets up one reporting run before checking any items. Each result includes dataset/run IDs and **report_url**, pinned to that run even after later runs arrive.
+
+Keep source event IDs stable for retries, including retries after a lost setup response. An intentional fresh batch needs fresh source event identities. Explicit reporting contexts remain supported; all items must agree on dataset and run. For separate loop nodes, use Set Up Batch Dataset once before the loop and pass its dataset/run IDs into each record. Setup requires dataset-management permission; it creates no scans or charges.
