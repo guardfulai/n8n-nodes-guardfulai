@@ -13,12 +13,13 @@ published Scan Policy and sufficient credits, and a scoped API key. See
 [n8n integration guide](https://www.guardfulai.com/integrations/n8n/), and
 [API documentation](https://www.guardfulai.com/api/).
 
-Open your Guardful AI workspace's [Integration keys](https://www.guardfulai.com/app/keys/)
-page and create a key restricted to your intended Scan Policies. For Check Content,
-request `auth:test`, `scan_policies:read` and `scan:check`. Dataset operations need
-`datasets:read` and/or `datasets:write`; reporting requires `datasets:write` and an unrestricted-policy key for dataset setup.
-Use only the scopes needed by your workflow. Keep the secret in n8n credentials.
-If your service uses another origin, use its Integration keys page instead.
+Open [Create integration key for n8n](https://www.guardfulai.com/app/keys/new/?integration=n8n).
+Review the editable n8n preset: `auth:test`, `scan_policies:read`, `scan:check`,
+`datasets:read`, `datasets:write`, all current/future organization policies and
+30-day expiry. Automatic batch reporting needs dataset setup permissions and
+all-policy access. Existing keys keep their original permissions; create a
+replacement if needed. Keep the secret in n8n credentials. If your service uses
+another origin, open the equivalent page there.
 
 Create a **Guardful AI API** credential:
 
@@ -28,14 +29,34 @@ Create a **Guardful AI API** credential:
 | API Key | Your workspace's private scoped key; the field is masked |
 
 Plain HTTP is permitted only for loopback development. The credential test calls
-`GET /v1/auth/test`; it does not scan or spend credits. In a container, loopback
+`GET /v1/auth/test`; it verifies authentication, not every operation’s permissions, and does not scan or spend credits. In a container, loopback
 refers to the container: choose an origin reachable from the n8n process. Do not
 put the secret in expressions, workflow exports, screenshots or chat.
+
+## First fictional workflow
+
+Follow the [workspace n8n guide](https://www.guardfulai.com/app/integrations/n8n/):
+create and publish its prefilled email-review example policy, create the recommended
+key, and download the starter. In n8n use **⋯ → Import from File**, then select your
+credential and published policy in **Guardful AI Check Content**. The download
+creates no key, policy, dataset or scan. It includes unique, stable fictional event
+IDs, no credentials, and harmless ending nodes.
+
+Before **Execute workflow**, review that two new checks consume normal scan credits.
+The email message should produce Review and stop; the harmless message should
+produce Allow and reach **Allowed — harmless end**. Inspect the returned batch
+report, Activity and Usage. Retry the saved workflow unchanged to retain identity;
+a fresh download creates new identities. Leave **Output → Simplified**, **Input
+Retention → Organization Default** and stop-on-error at their defaults.
+
+The repository's `examples/starter-workflow.json` is a template for tools and tests.
+Replace `EXAMPLE_ID` with one opaque identity before first use and retain it for
+retries; prefer the workspace download for ordinary setup.
 
 ## Check Content
 
 1. Add **Guardful AI** and choose **Check Content**.
-2. Select **Scan Policy** from the list. Each choice includes a version and price.
+2. Select **Scan Policy** from the list. Each choice includes a pinned version; a price appears only when supplied. Policies without a displayed price remain selectable.
    The saved value pins that version; publishing a newer policy does not silently
    change this workflow. **By ID** accepts `policy-uuid::version`.
 3. Map **Content**, **Source Event ID** and **Direction**. Supply **Context** and
@@ -76,7 +97,7 @@ Do not rely only on `decision`, HTTP status, a truthy string, or absence of find
 
 ### Output and redaction
 
-**Simplified** (default) returns up to ten fields: scan ID, status, decision, safe-to-continue,
+**Simplified** (default) returns the core result fields plus batch-reporting fields when applicable: scan ID, status, decision, safe-to-continue,
 policy version, flagged/redacted flags, optional redacted content, replay flag and usage.
 **Raw** returns the full validated result projection, including findings, check summaries,
 runtime identity and semantic assessments when present. It does not return an unfiltered

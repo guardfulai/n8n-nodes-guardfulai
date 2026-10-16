@@ -66,9 +66,10 @@ from the latest execution. Close the node panel to return to the canvas.
    policy is absent or different, leave that case pending; do not substitute a
    model policy. The minimum policy recipe below describes the required behavior.
 3. **Create the key on Guardful AI, then its credential in n8n.** On the website,
-   open [Integration keys](https://www.guardfulai.com/app/keys/) and create
-   **Local n8n QA** with `auth:test`, `scan_policies:read`, `scan:check`, restricted
-   to the selected test policies, and a short expiry (seven days or less).
+   open [Create integration key for n8n](https://www.guardfulai.com/app/keys/new/?integration=n8n).
+   Review the recommended five operations and all-policy access needed for automatic
+   batch reporting. Name it **Local n8n QA**, choose a seven-day expiry for this
+   temporary test, and select **Create key**.
 
    Return to the **local n8n browser tab → Guardful AI QA — production → Editor**.
    Double-click the canvas node named **Guardful AI Check Content**. In its
@@ -96,12 +97,12 @@ from the latest execution. Close the node panel to return to the canvas.
    Return to the canvas and double-click **Guardful AI Check Content** again.
    Under **Parameters**, keep **Operation → Check Content** and choose
    **Scan Policy → From List**, then select the intended policy/version from its
-   dropdown. The choices show the version and price; replace the example's
+   dropdown. The choices show the version and price when supplied; null-priced policies remain selectable; replace the example's
    placeholder policy. Keep **Content** and **Source Event ID** as the existing
    expressions, **Direction → Input**, **Return Redacted Content** on,
    **Concurrency → 2**, and **Context**, **Supplied Fields (JSON)** and
    **Dataset Reporting Context** blank. **Output** is also in this Parameters tab:
-   start with **Simplified**. It contains at most ten fields and omits original input,
+   start with **Simplified**. It includes the core result and batch-reporting fields, and omits original input,
    input availability and retention metadata. In **Options → Add Option**, choose
    **Input Retention** to set Organization Default, None, 1 Day, 7 Days or 30 Days;
    choose **Original Input in Output** to inherit, Show or Hide input in Raw or
@@ -220,3 +221,19 @@ inputs. Distinguish local mocked checks from production results.
 Developer verification: `npm run qa:verify` performs local host/package checks;
 it uses only fictional local credentials and never production scans. It requires
 the QA host to be stopped and preserves existing workflow configuration.
+
+## Starter acceptance without package preparation
+
+After building the source with Node 24, run `npm run qa:starter`. This uses the
+already-prepared pinned n8n runtime, a disposable SQLite home and a loopback-only
+fictional service. It imports the starter, checks Review/Allow branches, batch
+reporting, item pairing, transient retry and exact replay, and verifies that
+retention inherits the organization default. It creates no package archive and
+makes no production requests. `npm test` covers null-priced policy discovery,
+dataset pagination/search, scope denial and sanitized malformed/transport errors.
+
+For a real first-run check, follow the workspace n8n guide's starter download and
+six steps. Create the key through its n8n-specific link to prefill the five
+recommended scopes and all-policy access. Credential success confirms authentication
+only. A real starter run consumes two checks; review the normal scan cost
+before executing it. Review and Allow must reach separate harmless terminal nodes.

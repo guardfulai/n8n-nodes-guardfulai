@@ -23,7 +23,9 @@ independent from other repositories.
 - Preserve fail-closed routing, immutable policy selection and stable retry identity.
   Every output mode retains scan identity and routing fields. Error output never carries
   an Allow signal from input data.
-- Run `npm test`, `npm run lint`, `npm run build` and inspect `npm pack` before completion.
+- Run `npm test`, `npm run lint` and `npm run build` before completion. Inspect
+  distribution paths without preparing package archives. Package preparation, version
+  bumps and release commands are owner actions unless explicitly requested.
   Use Node 24, `npm ci` and the committed lockfile. Local dev data stays ignored.
 - GitHub/npm publication, release tags and Creator Portal submission require explicit
   authorization. A prepared publishing workflow is not publication authority.

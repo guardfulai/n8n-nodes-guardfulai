@@ -29,7 +29,8 @@
     "test": "node --test test/*.test.mjs",
     "check:package": "node scripts/check-package.mjs",
     "prepack": "npm run build",
-    "pretest": "npm run build"
+    "pretest": "npm run build",
+    "qa:starter": "node scripts/qa-starter.mjs"
   },
   "files": [
     "dist/nodes",

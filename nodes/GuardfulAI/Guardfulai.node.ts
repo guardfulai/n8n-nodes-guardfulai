@@ -124,7 +124,7 @@ export class Guardfulai implements INodeType {
           },
         ],
         description:
-          "Choose a priced policy version from the list, or enter its ID and version",
+          "Choose a published policy version from the list, or enter its ID and version",
       },
       {
         displayName: "Content",
@@ -370,7 +370,7 @@ export class Guardfulai implements INodeType {
           return {
             status: "OK",
             message:
-              "Guardful AI authenticated the credential. No scan credits were consumed.",
+              "Guardful AI authenticated the credential. Operation permissions are checked when used. No scan credits were consumed.",
           };
         } catch (error) {
           const detail = presentError(error, "integration_transport_error");
@@ -383,21 +383,32 @@ export class Guardfulai implements INodeType {
     },
     listSearch: {
       async getDatasets(this: ILoadOptionsFunctions, filter?: string, paginationToken?: string): Promise<INodeListSearchResult> {
-        const credentials = await this.getCredentials("guardfulaiApi");
-        const origin = normalizeOrigin(credentials.serviceOrigin);
-        const page = Number(paginationToken || "1");
-        if (!Number.isSafeInteger(page) || page < 1 || page > 100000) throw contractError("dataset_page_invalid");
-        const response = await this.helpers.httpRequestWithAuthentication.call(this, "guardfulaiApi", {
-          method: "GET", url: `${origin}/v1/datasets?page=${page}&page_size=50&search=${encodeURIComponent((filter || "").slice(0, 120))}`,
-          json: true, returnFullResponse: true, ignoreHttpStatusErrors: true, timeout: REQUEST_TIMEOUT_MS,
-        }) as HttpResponse;
-        if (response.statusCode !== 200) throw requestError(response);
-        const body = response.body as { datasets: { id: string; name: string }[]; total: number };
-        if (!body || !Array.isArray(body.datasets) || body.datasets.length > 50 || !Number.isSafeInteger(body.total)) throw contractError("dataset_response_invalid");
-        return { results: body.datasets.map(row => {
-          if (typeof row.name !== "string") throw contractError("dataset_response_invalid");
-          return { name: row.name, value: datasetId(row.id) };
-        }), paginationToken: page * 50 < body.total ? String(page + 1) : undefined };
+        try {
+          let credentials;
+          try {
+            credentials = await this.getCredentials("guardfulaiApi");
+          } catch {
+            throw contractError("credentials_required");
+          }
+          const origin = normalizeOrigin(credentials.serviceOrigin);
+          const page = Number(paginationToken || "1");
+          if (!Number.isSafeInteger(page) || page < 1 || page > 100000) throw contractError("dataset_page_invalid");
+          const response = await this.helpers.httpRequestWithAuthentication.call(this, "guardfulaiApi", {
+            method: "GET", url: `${origin}/v1/datasets?page=${page}&page_size=50&search=${encodeURIComponent((filter || "").slice(0, 120))}`,
+            json: true, returnFullResponse: true, ignoreHttpStatusErrors: true, timeout: REQUEST_TIMEOUT_MS,
+          }) as HttpResponse;
+          if (response.statusCode !== 200) throw requestError(response);
+          const body = response.body as { datasets: { id: string; name: string }[]; total: number };
+          if (!body || !Array.isArray(body.datasets) || body.datasets.length > 50 || !Number.isSafeInteger(body.total) || body.total < 0) throw contractError("dataset_response_invalid");
+          return { results: body.datasets.map(row => {
+            if (!row || typeof row.name !== "string") throw contractError("dataset_response_invalid");
+            let id;
+            try { id = datasetId(row.id); } catch { throw contractError("dataset_response_invalid"); }
+            return { name: row.name, value: id };
+          }), paginationToken: page < 100000 && page * 50 < body.total ? String(page + 1) : undefined };
+        } catch (error) {
+          throw operationError(this.getNode(), error, undefined, "integration_transport_error");
+        }
       },
       async getScanPolicies(
         this: ILoadOptionsFunctions,
@@ -450,12 +461,11 @@ export class Guardfulai implements INodeType {
             results: policies
               .filter(
                 (option) =>
-                  option.credits_per_short_scan !== null &&
                   (!filter ||
                     option.name.toLowerCase().includes(filter.toLowerCase())),
               )
               .map((option) => ({
-                name: `${option.name} — v${option.current_version}, ${option.credits_per_short_scan} credit${option.credits_per_short_scan === 1 ? "" : "s"}`,
+                name: `${option.name} — v${option.current_version}${option.credits_per_short_scan === null ? "" : `, ${option.credits_per_short_scan} credit${option.credits_per_short_scan === 1 ? "" : "s"}`}`,
                 value: `${option.id}::${option.current_version}`,
                 description: `${option.direction}; ${option.processing_mode}; ${option.pricing_version}`,
               })),

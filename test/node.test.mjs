@@ -470,7 +470,7 @@ for (const [statusCode, code, recovery] of [
   [
     403,
     "dataset_management_requires_unrestricted_policy",
-    /unrestricted policy/,
+    /all-policy access/,
   ],
   [402, "insufficient_credits", /Usage/],
   [404, "scan_policy_not_found", /Refresh 'Scan Policy'/],
@@ -738,4 +738,59 @@ test("failed batch records keep their reporting link", async () => {
   assert.ok(output.every(item => item.json.status === "error" && item.json.report_url === "https://service.example.test" + report));
   const stop = host(request, {}, [{ json: {} }, { json: {} }]);
   await assert.rejects(stop.node.execute.call(stop), error => { assert.ok(error.description.includes(report)); return true; });
+});
+
+test("policy discovery retains null prices, pinned versions and search", async () => {
+  const entries = [null, 0, 2].map((price, i) => ({
+    id: policy, name: `Example ${i}`, current_version: i + 1,
+    direction: "input", processing_mode: "local_only",
+    pricing_version: "fixture", credits_per_short_scan: price,
+  }));
+  const context = host(async () => ({ statusCode: 200, body: entries }));
+  const list = await context.node.methods.listSearch.getScanPolicies.call(context);
+  assert.equal(list.results.length, 3);
+  assert.equal(list.results[0].value, `${policy}::1`);
+  assert.match(list.results[0].name, /Example 0.*v1/);
+  assert.doesNotMatch(list.results[0].name, /null|credit/);
+  assert.match(list.results[1].name, /0 credits?/);
+  const search = await context.node.methods.listSearch.getScanPolicies.call(context, "EXAMPLE 0");
+  assert.deepEqual(search.results, [list.results[0]]);
+});
+
+test("dataset picker paginates, encodes search and pins IDs", async () => {
+  let url;
+  const context = host(async (options) => {
+    url = options.url;
+    return { statusCode: 200, body: { datasets: [{ id: policy, name: "Examples" }], total: 101 } };
+  });
+  const list = await context.node.methods.listSearch.getDatasets.call(context, "name & more", "2");
+  assert.match(url, /page=2&page_size=50&search=name%20%26%20more/);
+  assert.equal(list.results[0].value, policy);
+  assert.equal(list.paginationToken, "3");
+  const end = await context.node.methods.listSearch.getDatasets.call(context, "", "3");
+  assert.equal(end.paginationToken, undefined);
+});
+
+test("dataset picker sanitizes credential, HTTP, transport and malformed responses", async () => {
+  const privateDetail = "PRIVATE_CREDENTIAL_OR_RESPONSE";
+  for (const body of [null, {}, { datasets: [null], total: 1 }, { datasets: [{ id: privateDetail, name: "x" }], total: 1 }, { datasets: [], total: -1 }, { datasets: [], total: "1" }]) {
+    const context = host(async () => ({ statusCode: 200, body }));
+    await assert.rejects(context.node.methods.listSearch.getDatasets.call(context), (error) => {
+      assert.match(error.message, /dataset_response_invalid/);
+      assert.ok(!JSON.stringify(error).includes(privateDetail));
+      return true;
+    });
+  }
+  for (const kind of ["credential", "transport", "http"]) {
+    const context = host(async () => {
+      if (kind === "http") return { statusCode: 403, body: { code: "scope_required", message: privateDetail } };
+      throw new Error(privateDetail);
+    });
+    if (kind === "credential") context.getCredentials = async () => { throw new Error(privateDetail); };
+    await assert.rejects(context.node.methods.listSearch.getDatasets.call(context), (error) => {
+      assert.ok(!JSON.stringify(error).includes(privateDetail));
+      if (kind === "http") assert.match(error.description, /datasets:read/);
+      return true;
+    });
+  }
 });

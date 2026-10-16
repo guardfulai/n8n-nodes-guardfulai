@@ -8,7 +8,7 @@ const guidance = {
   access: {
     message: "The integration key cannot access this operation or policy",
     description:
-      "Check the key's allowed operations and Scan Policies in Guardful AI Integration keys. Credential testing needs auth:test; policy selection needs scan_policies:read; checking needs scan:check. Dataset setup needs the corresponding datasets scope and unrestricted policy access for writes.",
+      "Check the key's allowed operations and Scan Policies in Guardful AI Integration keys. Credential testing needs auth:test; policy selection needs scan_policies:read; checking needs scan:check. Dataset listing needs datasets:read. Dataset setup, including automatic batch reporting, needs datasets:write and all-policy access.",
   },
   credits: {
     message: "Guardful AI has insufficient available credits",
