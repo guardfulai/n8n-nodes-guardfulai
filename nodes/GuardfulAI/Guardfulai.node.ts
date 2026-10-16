@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
 import { datasetId, reportingContext } from "./reporting";
 import type {
-  ICredentialTestFunctions,
-  ICredentialsDecrypted,
-  ICredentialDataDecryptedObject,
-  INodeCredentialTestResult,
   INode,
   IDataObject,
   IExecuteFunctions,
@@ -62,7 +58,6 @@ export class Guardfulai implements INodeType {
       {
         name: "guardfulaiApi",
         required: true,
-        testedBy: "testGuardfulAICredential",
       },
     ],
     properties: [
@@ -338,49 +333,6 @@ export class Guardfulai implements INodeType {
   };
 
   methods = {
-    credentialTest: {
-      async testGuardfulAICredential(
-        this: ICredentialTestFunctions,
-        credential: ICredentialsDecrypted<ICredentialDataDecryptedObject>,
-      ): Promise<INodeCredentialTestResult> {
-        try {
-          const data = credential.data ?? {};
-          const origin = normalizeOrigin(data.serviceOrigin);
-          if (typeof data.apiKey !== "string" || !data.apiKey.trim())
-            throw contractError("credentials_required");
-          // n8n's ICredentialTestFunctions exposes only request, including on the
-          // pinned host. Keep this exception confined to credential testing.
-          // eslint-disable-next-line @n8n/community-nodes/no-deprecated-workflow-functions
-          const response = (await this.helpers.request({
-            method: "GET",
-            uri: `${origin}/v1/auth/test`,
-            headers: { Authorization: `Bearer ${data.apiKey}` },
-            json: true,
-            resolveWithFullResponse: true,
-            simple: false,
-            timeout: REQUEST_TIMEOUT_MS,
-          })) as HttpResponse;
-          if (response.statusCode !== 200) throw requestError(response);
-          if (
-            !response.body ||
-            typeof response.body !== "object" ||
-            (response.body as Record<string, unknown>).authenticated !== true
-          )
-            throw contractError("invalid_api_response");
-          return {
-            status: "OK",
-            message:
-              "Guardful AI authenticated the credential. Operation permissions are checked when used. No scan credits were consumed.",
-          };
-        } catch (error) {
-          const detail = presentError(error, "integration_transport_error");
-          return {
-            status: "Error",
-            message: `${detail.message} (${detail.code}). ${detail.description}`,
-          };
-        }
-      },
-    },
     listSearch: {
       async getDatasets(this: ILoadOptionsFunctions, filter?: string, paginationToken?: string): Promise<INodeListSearchResult> {
         try {

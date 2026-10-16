@@ -216,7 +216,14 @@ export async function startStub(port) {
           }),
         );
       } else {
-        res.end(JSON.stringify({ authenticated: true }));
+        const authenticated = {
+          "Bearer qa-credential-false": false,
+          "Bearer qa-credential-missing": undefined,
+          "Bearer qa-credential-null": null,
+        };
+        res.end(JSON.stringify({
+          authenticated: Object.hasOwn(authenticated, key) ? authenticated[key] : true,
+        }));
       }
       return;
     }

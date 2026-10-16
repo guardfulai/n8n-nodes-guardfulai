@@ -91,11 +91,8 @@ test("credentials and node declarations retain public identities and protected A
     credential.properties.find((p) => p.name === "serviceOrigin").default,
     "https://www.guardfulai.com",
   );
-  assert.equal(
-    node.description.credentials[0].testedBy,
-    "testGuardfulAICredential",
-  );
-  assert.equal(credential.test, undefined);
+  assert.equal(node.description.credentials[0].testedBy, undefined);
+  assert.equal(credential.test.request.url, "/v1/auth/test");
   assert.deepEqual(
     parsePolicySelection({ mode: "id", value: `${policy}::2` }),
     { policyId: policy, policyVersion: 2 },
@@ -526,53 +523,52 @@ for (const response of [
   });
 }
 
-test("credential testing uses auth/test and sanitizes transport and service details", async () => {
-  const node = new Guardfulai();
-  let request;
-  const credential = {
-    id: "synthetic",
-    name: "synthetic",
-    type: "guardfulaiApi",
-    data: {
-      serviceOrigin: "https://service.example.test",
-      apiKey: "PRIVATE_KEY",
-    },
-  };
-  const run = async (response) =>
-    node.methods.credentialTest.testGuardfulAICredential.call(
-      {
-        helpers: {
-          request: async (options) => {
-            request = options;
-            if (response instanceof Error) throw response;
-            return response;
-          },
-        },
-      },
-      credential,
+test("native credential test preserves origin validation and authentication", async () => {
+  const credential = new GuardfulAIApi();
+  const options = await credential.authenticate(
+    { serviceOrigin: "https://service.example.test/", apiKey: "SYNTHETIC_KEY" },
+    { url: "/v1/auth/test", headers: { Accept: "application/json" } },
+  );
+  assert.equal(options.baseURL, "https://service.example.test");
+  assert.equal(options.headers.Authorization, "Bearer SYNTHETIC_KEY");
+  assert.equal(options.headers.Accept, "application/json");
+  assert.equal(credential.test.request.method, "GET");
+  assert.equal(credential.test.request.timeout, 30000);
+  assert.equal(credential.test.request.disableFollowRedirect, true);
+  for (const serviceOrigin of [
+    "http://127.0.0.1:5778",
+    "http://localhost:5778",
+    "http://[::1]:5778",
+  ])
+    await credential.authenticate(
+      { serviceOrigin, apiKey: "SYNTHETIC_KEY" },
+      { url: "/v1/auth/test" },
     );
-  const success = await run({ statusCode: 200, body: { authenticated: true } });
-  assert.equal(success.status, "OK");
-  assert.equal(request.uri, "https://service.example.test/v1/auth/test");
-  assert.equal(request.timeout, 30000);
-  assert.equal(request.headers.Authorization, "Bearer PRIVATE_KEY");
-  for (const response of [
+  for (const data of [
+    { serviceOrigin: "http://service.example.test", apiKey: "SYNTHETIC_KEY" },
     {
-      statusCode: 401,
-      body: { code: "invalid_api_key", message: "PRIVATE_KEY" },
+      serviceOrigin: "https://service.example.test/path",
+      apiKey: "SYNTHETIC_KEY",
     },
-    { statusCode: 403, body: { code: "scope_denied", message: "PRIVATE_KEY" } },
-    { statusCode: 200, body: "PRIVATE_KEY" },
-    new Error("PRIVATE_KEY"),
+    {
+      serviceOrigin: "https://SYNTHETIC_KEY@example.test",
+      apiKey: "SYNTHETIC_KEY",
+    },
+    { serviceOrigin: "https://service.example.test", apiKey: " " },
+    { serviceOrigin: "https://service.example.test" },
   ]) {
-    const outcome = await run(response);
-    assert.equal(outcome.status, "Error");
-    assert.equal(JSON.stringify(outcome).includes("PRIVATE_KEY"), false);
-    assert.match(
-      outcome.message,
-      /Replace|allowed operations|support|connectivity/,
+    await assert.rejects(
+      credential.authenticate(data, { url: "/v1/auth/test" }),
+      (error) => {
+        assert.equal(error.message.includes("SYNTHETIC_KEY"), false);
+        return true;
+      },
     );
   }
+  const rejectionValues = credential.test.rules
+    .filter((rule) => rule.type === "responseSuccessBody")
+    .map((rule) => rule.properties.value);
+  assert.deepEqual(rejectionValues, [false, undefined, null]);
 });
 
 for (const response of [

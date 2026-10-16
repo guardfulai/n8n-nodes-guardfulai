@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
+import { runScan } from "./check-community.mjs";
 
 const directory = mkdtempSync(join(tmpdir(), "guardfulai-node-pack-"));
 try {
   execFileSync("npm", ["run", "build"], { stdio: "inherit" });
+  await runScan(["source"]);
   const packed = JSON.parse(
     execFileSync(
       "npm",
@@ -78,7 +80,10 @@ try {
       assert.ok(
         modules.every(
           (name) =>
-            name.startsWith("./") ||
+            ((name.startsWith("./") || name.startsWith("../")) &&
+              paths.includes(
+                `${posix.normalize(posix.join(posix.dirname(path), name))}.js`,
+              )) ||
             ["n8n-workflow", "node:crypto"].includes(name),
         ),
         `External runtime dependency in ${path}`,
@@ -101,6 +106,8 @@ try {
   for (const path of [...metadata.n8n.nodes, ...metadata.n8n.credentials])
     assert.ok(paths.includes(`package/${path}`));
   assert.equal(readFileSync("LICENSE", "utf8").includes("MIT License"), true);
+  execFileSync("tar", ["-xzf", archive, "-C", directory]);
+  await runScan(["payload", join(directory, "package")]);
   console.log(
     JSON.stringify(
       {
@@ -111,6 +118,8 @@ try {
         shasum: packed.shasum,
         integrity: packed.integrity,
         hygiene: "passed",
+        communitySource: "passed",
+        communityPayload: "passed",
       },
       null,
       2,

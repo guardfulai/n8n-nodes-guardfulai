@@ -26,6 +26,7 @@ import {
   linkPackage,
   runWithRuntime,
 } from "./qa-support.mjs";
+import { verifyNativeCredentials } from "./qa-credentials.mjs";
 import { workflows, dummyCredentialId } from "./qa-workflows.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -166,12 +167,8 @@ try {
   report.packagedCredentialLoaded = true;
   const packedNode = loader.getNode("guardfulai").type;
   const packedCredential = loader.getCredential("guardfulaiApi").type;
-  assert.equal(packedCredential.test, undefined);
-  assert.equal(
-    packedNode.description.credentials[0].testedBy,
-    "testGuardfulAICredential",
-  );
-  assert.ok(packedNode.methods.credentialTest.testGuardfulAICredential);
+  assert.equal(packedCredential.test.request.url, "/v1/auth/test");
+  assert.equal(packedNode.description.credentials[0].testedBy, undefined);
   const options = packedNode.description.properties.find(
     (property) => property.name === "options",
   );
@@ -283,31 +280,14 @@ try {
   const stubPort = await freePort(5978);
   const brokerPort = await freePort(stubPort + 100);
   stub = await startStub(stubPort);
-  const {
-    CredentialTestContext,
-  } = require("./node_modules/n8n-core/dist/execution-engine/node-execution-context/credentials-test-context.js");
-  const credentialContext = new CredentialTestContext();
-  report.credentials = [];
-  for (const [key, status] of [
-    ["qa-output", "OK"],
-    ["qa-credential-auth", "Error"],
-    ["qa-credential-scope", "Error"],
-    ["qa-transport", "Error"],
-  ]) {
-    const outcome =
-      await packedNode.methods.credentialTest.testGuardfulAICredential.call(
-        credentialContext,
-        {
-          id: "synthetic-credential",
-          name: "Synthetic local credential",
-          type: "guardfulaiApi",
-          data: { serviceOrigin: `http://127.0.0.1:${stubPort}`, apiKey: key },
-        },
-      );
-    assert.equal(outcome.status, status);
-    assert.equal(outcome.message.includes("PRIVATE_QA_DETAIL"), false);
-    report.credentials.push({ key, status });
-  }
+  report.credentials = await verifyNativeCredentials({
+    node,
+    n8n,
+    packageDir,
+    scratch,
+    base,
+    stubOrigin: `http://127.0.0.1:${stubPort}`,
+  });
   const env = hostEnvironment(
     base,
     smokeRoot,
@@ -315,6 +295,13 @@ try {
     brokerPort,
   );
   const fixtures = workflows(repo, "smoke0000").slice(1);
+  // Pin a synthetic reporting run so these multi-item scan fixtures do not
+  // call dataset setup before reaching their per-item error/output assertions.
+  for (const fixture of fixtures) {
+    const check = fixture.nodes.find(value => value.name === "Guardful AI Check Content");
+    check.parameters.reporting =
+      '={{ {dataset_id: "00000000-0000-4000-8000-000000000201", run_id: "00000000-0000-4000-8000-000000000202", record_id: $json.event_id} }}';
+  }
   const input = join(scratch, "errors.json");
   privateJson(input, fixtures);
   await command(
@@ -453,7 +440,12 @@ try {
     }
     if (mode === "simplified") {
       for (const item of items) {
-        assert.equal(Object.keys(item.json).length, 10);
+        const reportFields = ["dataset_id", "run_id", "dataset_name", "report_url"];
+        assert.equal(
+          Object.keys(item.json).filter(field => !reportFields.includes(field)).length,
+          10,
+        );
+        assert.equal(item.json.run_id, "00000000-0000-4000-8000-000000000202");
         for (const field of ["input", "input_state", "input_retention"])
           assert.equal(Object.hasOwn(item.json, field), false);
       }

@@ -16,8 +16,8 @@
     "url": "git+https://github.com/guardfulai/n8n-nodes-guardfulai.git"
   },
   "scripts": {
-    "build": "n8n-node build",
-    "build:watch": "tsc --watch",
+    "build": "node scripts/build.mjs",
+    "build:watch": "node node_modules/typescript/bin/tsc --watch",
     "dev": "n8n-node dev",
     "qa:local": "node scripts/qa-local.mjs",
     "qa:prepare": "node scripts/qa-local.mjs --prepare",
@@ -30,7 +30,9 @@
     "check:package": "node scripts/check-package.mjs",
     "prepack": "npm run build",
     "pretest": "npm run build",
-    "qa:starter": "node scripts/qa-starter.mjs"
+    "qa:starter": "node scripts/qa-starter.mjs",
+    "check:community": "node scripts/check-community.mjs source",
+    "check:published": "node scripts/check-community.mjs published"
   },
   "files": [
     "dist/nodes",
@@ -48,6 +50,7 @@
   },
   "devDependencies": {
     "@n8n/node-cli": "0.51.3",
+    "@n8n/scan-community-package": "0.39.0",
     "eslint": "9.32.0",
     "prettier": "3.6.2",
     "release-it": "^21.1.0",

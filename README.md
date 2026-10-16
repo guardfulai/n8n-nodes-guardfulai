@@ -218,6 +218,7 @@ npm ci
 npm test
 npm run lint
 npm run build
+npm run check:package
 npm pack --dry-run --json
 npm pack
 npm run dev -- --custom-user-folder $HOME/guardfulai-n8n-dev
@@ -234,6 +235,18 @@ Development-host environment settings do not authorize runtime node access to th
 Unit tests use mocked requests and synthetic fixtures. Build and inspect the actual
 packaged payload before release: only compiled node/credential code, metadata,
 license and README are distributed. Tests and examples remain source-repository files.
+`npm run check:package` runs the pinned official community scanner against source
+and the actual temporary package before release. Inline lint suppressions cannot
+bypass this check. It runs offline after `npm ci` and is also required by CI and
+the publishing workflow. For source analysis alone, run `npm run check:community`.
+The build resolves this project's pinned TypeScript compiler explicitly, avoiding
+executable-name collisions with the scanner's own compiler dependency. Node16
+module resolution also keeps the official CLI watcher compatible with that dependency.
+
+Published provenance and registry checks remain separate. Only when verifying an
+already published exact version, run `npm run check:published -- VERSION`, replacing
+`VERSION` with that stable version. This command uses the network and exits nonzero
+on failed, missing or mismatched scanner results; it does not publish anything.
 
 ## Publication and support
 
