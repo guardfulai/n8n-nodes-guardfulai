@@ -295,13 +295,6 @@ try {
     brokerPort,
   );
   const fixtures = workflows(repo, "smoke0000").slice(1);
-  // Pin a synthetic reporting run so these multi-item scan fixtures do not
-  // call dataset setup before reaching their per-item error/output assertions.
-  for (const fixture of fixtures) {
-    const check = fixture.nodes.find(value => value.name === "Guardful AI Check Content");
-    check.parameters.reporting =
-      '={{ {dataset_id: "00000000-0000-4000-8000-000000000201", run_id: "00000000-0000-4000-8000-000000000202", record_id: $json.event_id} }}';
-  }
   const input = join(scratch, "errors.json");
   privateJson(input, fixtures);
   await command(

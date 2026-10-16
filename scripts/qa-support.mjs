@@ -153,6 +153,19 @@ export async function freePort(preferred, exact = false) {
 export async function startStub(port) {
   const server = createServer((req, res) => {
     const key = req.headers.authorization;
+    // Keep batch setup local and successful so scan fixtures reach their
+    // intended per-item error and output assertions.
+    if (req.method === "POST" && req.url === "/v1/dataset-runs") {
+      req.resume();
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({
+        dataset_id: "00000000-0000-4000-8000-000000000201",
+        run_id: "00000000-0000-4000-8000-000000000202",
+        dataset_name: "Synthetic QA batch",
+        report_url: "/app/datasets/00000000-0000-4000-8000-000000000201/?run_id=00000000-0000-4000-8000-000000000202",
+      }));
+      return;
+    }
     if (key === "Bearer qa-output" && req.url === "/v1/check") {
       let text = "";
       req.on("data", (chunk) => {

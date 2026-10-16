@@ -113,7 +113,6 @@ for (const [group, codes] of Object.entries({
 }
 
 const parameters: Record<string, [string, string]> = {
-  dataset_destination_conflict: ["Dataset", "Use one dataset and run for every item. Remove conflicting per-item reporting before retrying."],
   dataset_destination_invalid: ["Dataset", "Choose New Dataset, Existing Dataset or Standalone Scans."],
   dataset_count_invalid: ["Number of Records", "Use a whole number from 0 through 50000."],
   dataset_archived: ["Dataset", "Select an active dataset or create a new dataset."],
@@ -143,8 +142,8 @@ const parameters: Record<string, [string, string]> = {
     "Supply a JSON object with at most 16 scalar fields matching the policy's required types.",
   ],
   reporting_input_invalid: [
-    "Dataset Reporting Context",
-    "Check the dataset and record IDs, run identity, event date/time and dimensions. Dataset setup also needs a valid name, reporting basis and Run Identity.",
+    "Dataset",
+    "Check your Dataset selection and dataset setup fields, then retry.",
   ],
   input_retention_invalid: [
     "Input Retention",

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { datasetId, reportingContext } from "./reporting";
+import { datasetId } from "./reporting";
 import type {
   INode,
   IDataObject,
@@ -79,7 +79,7 @@ export class Guardfulai implements INodeType {
         displayName: "Dataset", name: "datasetDestination", type: "options", default: "new",
         displayOptions: { show: { operation: ["checkContent", "setupDatasetRun"] } },
         options: [{ name: "New Dataset", value: "new" }, { name: "Existing Dataset", value: "existing" }, { name: "Standalone Scans", value: "standalone" }],
-        description: 'Destination for multi-record executions. Explicit reporting contexts retain their selected destination.',
+        description: "<p>Choose where to send the results when checking multiple records at once.</p>",
       },
       {
         displayName: "New Dataset Name", name: "batchDatasetName", type: "string", default: "",
@@ -152,6 +152,8 @@ export class Guardfulai implements INodeType {
           { name: "Output", value: "output" },
         ],
         default: "input",
+        description:
+          "Choose Input for incoming content, such as a user message, or Output for outgoing content, such as an AI response. This must match the selected scan policy’s direction.",
       },
       {
         displayName: "Context",
@@ -161,7 +163,7 @@ export class Guardfulai implements INodeType {
         typeOptions: { rows: 3 },
         default: "",
         description:
-          "Optional context counted as analyzed input; not returned in findings",
+          "<p>Optional background that helps the scan policy interpret Content, such as the original question when checking an AI response.</p>",
       },
       {
         displayName: "Supplied Fields (JSON)",
@@ -170,8 +172,9 @@ export class Guardfulai implements INodeType {
         type: "string",
         typeOptions: { rows: 3 },
         default: "",
+        placeholder: "Leave blank unless your scan policy requires supplied fields",
         description:
-          'Map a JSON object of typed facts required by the policy, for example {"amount":750,"approved":false}',
+          'Usually leave this blank. Only provide a JSON object if your scan policy requires supplied fields, for example {"amount":750,"approved":false}.',
       },
       {
         displayName: "Return Redacted Content",
@@ -181,15 +184,6 @@ export class Guardfulai implements INodeType {
         default: false,
         description:
           "Whether to return an ephemeral redacted value in this workflow execution",
-      },
-      {
-        displayName: "Dataset Reporting Context",
-        name: "reporting",
-        displayOptions: { show: { operation: ["checkContent"] } },
-        type: "json",
-        default: "",
-        description:
-          "Optional JSON with dataset_id, record_id, optional run_id, one event date, and chosen dimensions. Keep identical on retry; never copy content into metadata.",
       },
       {
         displayName: "Output",
@@ -501,27 +495,20 @@ export class Guardfulai implements INodeType {
         throw operationError(this.getNode(), error, 0, "dataset_setup_failed");
       }
     }
-    const contexts = items.map((_item, index) => reportingContext(this.getNodeParameter("reporting", index, "")));
     let batch: Record<string, unknown> | undefined;
     const count = items.filter((_item, index) => String(this.getNodeParameter("content", index, "")).trim()).length;
     if (count > 1) {
       try {
-        const explicit = contexts.filter(value => value !== undefined);
-        if (explicit.length && (explicit.length !== contexts.length || explicit.some(value => value.dataset_id !== explicit[0].dataset_id || value.run_id !== explicit[0].run_id))) throw contractError("dataset_destination_conflict");
-        if (explicit[0]?.run_id) {
-          batch = { dataset_id: explicit[0].dataset_id, run_id: explicit[0].run_id, report_url: `/app/datasets/${explicit[0].dataset_id}/?run_id=${explicit[0].run_id}` };
-        } else {
-          const selection = this.getNodeParameter("batchDataset", 0, { value: "" }) as { value: string };
-          // Existing event IDs are the node's retry authority. Fresh event IDs
-          // identify a fresh batch; credentials and content never enter metadata.
-          const identity = createHash("sha256").update(JSON.stringify([this.getNode().id, items.map((_item, index) => this.getNodeParameter("eventId", index))])).digest("hex");
-          batch = await datasetSetup(request, {
-            operation: "setupDatasetRun", externalId: `n8n:${identity}`, expectedRecords: count,
-            destination: explicit[0] ? "existing" : this.getNodeParameter("datasetDestination", 0, "new") as string,
-            dataset: explicit[0]?.dataset_id || selection.value,
-            name: this.getNodeParameter("batchDatasetName", 0, "") as string,
-          });
-        }
+        const selection = this.getNodeParameter("batchDataset", 0, { value: "" }) as { value: string };
+        // Existing event IDs are the node's retry authority. Fresh event IDs
+        // identify a fresh batch; credentials and content never enter metadata.
+        const identity = createHash("sha256").update(JSON.stringify([this.getNode().id, items.map((_item, index) => this.getNodeParameter("eventId", index))])).digest("hex");
+        batch = await datasetSetup(request, {
+          operation: "setupDatasetRun", externalId: `n8n:${identity}`, expectedRecords: count,
+          destination: this.getNodeParameter("datasetDestination", 0, "new") as string,
+          dataset: selection.value,
+          name: this.getNodeParameter("batchDatasetName", 0, "") as string,
+        });
       } catch (error) { throw operationError(this.getNode(), error, undefined, "dataset_setup_failed"); }
     }
     const output = await runBounded(
@@ -591,9 +578,9 @@ export class Guardfulai implements INodeType {
                   : undefined
                 : visibility === "true",
             reporting: batch ? {
-              ...contexts[itemIndex], dataset_id: String(batch.dataset_id), run_id: String(batch.run_id),
-              record_id: contexts[itemIndex]?.record_id || `item:${itemIndex}`,
-            } : contexts[itemIndex],
+              dataset_id: String(batch.dataset_id), run_id: String(batch.run_id),
+              record_id: `item:${itemIndex}`,
+            } : undefined,
           });
           return {
             json: { ...selectOutput(result, outputMode, outputFields), ...(batch ? { dataset_id: batch.dataset_id, run_id: batch.run_id, dataset_name: batch.dataset_name, report_url: `${origin}${batch.report_url}` } : {}) } as IDataObject,

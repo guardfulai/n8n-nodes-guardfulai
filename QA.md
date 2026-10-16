@@ -100,8 +100,8 @@ from the latest execution. Close the node panel to return to the canvas.
    dropdown. The choices show the version and price when supplied; null-priced policies remain selectable; replace the example's
    placeholder policy. Keep **Content** and **Source Event ID** as the existing
    expressions, **Direction → Input**, **Return Redacted Content** on,
-   **Concurrency → 2**, and **Context**, **Supplied Fields (JSON)** and
-   **Dataset Reporting Context** blank. **Output** is also in this Parameters tab:
+   **Concurrency → 2**. Leave **Context** and **Supplied Fields (JSON)** blank for
+   these examples. **Output** is also in this Parameters tab:
    start with **Simplified**. It includes the core result and batch-reporting fields, and omits original input,
    input availability and retention metadata. In **Options → Add Option**, choose
    **Input Retention** to set Organization Default, None, 1 Day, 7 Days or 30 Days;

@@ -253,6 +253,15 @@ test("local stub supplies unbillable auth, conflict and transport failures", asy
       ["qa-policy", 404, "scan_policy_not_found"],
       ["qa-hostile", 500, "PRIVATE_QA_DETAIL"],
     ]) {
+      const setup = await fetch(`${origin}/v1/dataset-runs`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ external_id: "synthetic-batch", destination: { mode: "new" }, expected_records: 2 }),
+      });
+      assert.equal(setup.status, 200);
+      const receipt = await setup.json();
+      assert.equal(receipt.report_url, `/app/datasets/${receipt.dataset_id}/?run_id=${receipt.run_id}`);
+      assert.equal(receipt.dataset_name, "Synthetic QA batch");
       const response = await fetch(`${origin}/v1/check`, {
         method: "POST",
         headers: { Authorization: `Bearer ${key}` },
@@ -260,6 +269,11 @@ test("local stub supplies unbillable auth, conflict and transport failures", asy
       assert.equal(response.status, status);
       assert.equal((await response.json()).code, code);
     }
+    const setup = await fetch(`${origin}/v1/dataset-runs`, {
+      method: "POST",
+      headers: { Authorization: "Bearer qa-transport" },
+    });
+    assert.equal(setup.status, 200);
     await assert.rejects(
       fetch(`${origin}/v1/check`, {
         method: "POST",

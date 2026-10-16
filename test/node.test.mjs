@@ -693,7 +693,7 @@ test("malformed dataset projection directs users to support, not input mappings"
   });
 });
 
-test("batch destination is set up once and conflicting reporting is rejected before checks", async () => {
+test("batch destination is set up once and retains identity on retry", async () => {
   const seen = [];
   const receipt = { dataset_id: '00000000-0000-4000-8000-000000000002', run_id: '00000000-0000-4000-8000-000000000003', dataset_name: 'Batch', report_url: '/app/datasets/00000000-0000-4000-8000-000000000002/?run_id=00000000-0000-4000-8000-000000000003' };
   const context = host(async options => { seen.push(options); return { statusCode: 200, body: options.url.endsWith('/v1/dataset-runs') ? receipt : result }; }, {}, [{ json: {} }, { json: {} }]);
@@ -702,13 +702,62 @@ test("batch destination is set up once and conflicting reporting is rejected bef
   assert.equal(seen[0].body.destination.mode, 'new');
   assert.equal(seen[0].body.expected_records, 2);
   assert.ok(seen.slice(1).every(o => o.body.reporting.run_id === receipt.run_id));
+  assert.deepEqual(seen.slice(1).map(o => o.body.reporting.record_id), ["item:0", "item:1"]);
   assert.ok(output.every(o => o.json.report_url === 'https://service.example.test' + receipt.report_url));
+  assert.deepEqual(output.map(o => o.pairedItem), [{ item: 0 }, { item: 1 }]);
   const retry = await context.node.execute.call(context);
   assert.equal(seen[3].body.external_id, seen[0].body.external_id);
   assert.equal(retry[0][0].json.run_id, receipt.run_id);
-  const conflict = host(async () => { throw new Error('must not execute'); }, { reporting: index => JSON.stringify({ dataset_id: index ? '00000000-0000-4000-8000-000000000004' : receipt.dataset_id, record_id: 'row:' + index }) }, [{json: {}}, {json: {}}]);
-  await assert.rejects(conflict.node.execute.call(conflict), /dataset_destination_conflict/);
 });
+
+for (const mode of ["new", "existing", "standalone"]) {
+  test(`automatic batch reporting follows ${mode} selection and ignores saved reporting`, async () => {
+    const dataset = "00000000-0000-4000-8000-000000000401";
+    const run = "00000000-0000-4000-8000-000000000402";
+    const receipt = { dataset_id: dataset, run_id: run, dataset_name: "Batch", report_url: `/app/datasets/${dataset}/?run_id=${run}` };
+    const seen = [];
+    const params = {
+      datasetDestination: mode,
+      batchDataset: { value: dataset },
+      batchDatasetName: "Selected batch",
+      reporting: index => index ? "malformed saved JSON" : { dataset_id: policy, run_id: policy, record_id: "old-record", dimensions: { team: "old-team" } },
+    };
+    const context = host(async options => {
+      seen.push(options);
+      return { statusCode: 200, body: options.url.endsWith("/v1/dataset-runs") ? receipt : result };
+    }, params, [{ json: {} }, { json: {} }]);
+    const readParameter = context.getNodeParameter;
+    context.getNodeParameter = (name, ...args) => {
+      assert.notEqual(name, "reporting", "removed saved values must never be read");
+      return readParameter(name, ...args);
+    };
+    await context.node.execute.call(context);
+    assert.deepEqual(seen[0].body.destination, {
+      mode,
+      ...(mode === "existing" ? { dataset_id: dataset } : {}),
+      ...(mode === "new" ? { name: "Selected batch" } : {}),
+    });
+    assert.deepEqual(seen.slice(1).map(options => options.body.reporting), [0, 1].map(index => ({ dataset_id: dataset, run_id: run, record_id: `item:${index}` })));
+    const identity = seen[0].body.external_id;
+    params.eventId = index => `fresh-event-${index}`;
+    await context.node.execute.call(context);
+    assert.notEqual(seen[3].body.external_id, identity);
+  });
+}
+
+for (const reporting of ["malformed saved JSON", { dataset_id: policy, run_id: policy, record_id: "old-record" }]) {
+  test(`single-record scans omit reporting despite saved ${typeof reporting} values`, async () => {
+    const seen = [];
+    const context = host(async options => {
+      seen.push(options);
+      return { statusCode: 200, body: result };
+    }, { reporting });
+    await context.node.execute.call(context);
+    assert.equal(seen.length, 1);
+    assert.ok(seen[0].url.endsWith("/v1/check"));
+    assert.equal(Object.hasOwn(seen[0].body, "reporting"), false);
+  });
+}
 
 for (const mode of ["new", "existing", "standalone"]) test(`setup action exposes ${mode} destination and clickable report`, async () => {
   const dataset = "00000000-0000-4000-8000-000000000401";

@@ -2,7 +2,7 @@
 
 Guardful AI checks content against a versioned Scan Policy and returns an Allow,
 Review or Block decision. Use this node between an event trigger and its next action.
-It also supports dataset setup and optional reporting context. The node can be used
+It also supports dataset setup and automatic batch reporting. The node can be used
 in ordinary workflows and as an AI tool.
 
 ## Prerequisites and authentication
@@ -59,22 +59,24 @@ retries; prefer the workspace download for ordinary setup.
 2. Select **Scan Policy** from the list. Each choice includes a pinned version; a price appears only when supplied. Policies without a displayed price remain selectable.
    The saved value pins that version; publishing a newer policy does not silently
    change this workflow. **By ID** accepts `policy-uuid::version`.
-3. Map **Content**, **Source Event ID** and **Direction**. Supply **Context** and
-   **Supplied Fields (JSON)** only when your policy needs them.
+3. Map **Content**, **Source Event ID** and **Direction**. Add **Context** when
+   background information would help interpret the content. Usually leave
+   **Supplied Fields (JSON)** blank; fill it in only if your scan policy requires supplied fields.
 4. Choose whether to return redacted content. Review the policy cost before execution.
 5. Add an IF/Switch step immediately afterward with the safe-routing rule below.
 
 A Source Event ID is a durable identity from the upstream event, not a timestamp,
 random value, content hash or n8n execution ID generated for each retry. Distinct
 events need distinct identities. Retry with the same event ID, item order, policy
-ID/version, content, context, supplied fields and reporting context. The node combines
+ID/version, content, context and supplied fields. The node combines
 event ID, item index and policy ID/version into its idempotency key. Reordering items
 changes their identities. The API external ID is limited to the first 64 characters;
 use short opaque IDs. Changing a request under the same identity is a conflict.
 
 **Concurrency** bounds simultaneous checks and preserves input ordering and item
 pairing. It does not change the charge for a new scan. **Supplied Fields (JSON)**
-is a JSON object of up to 16 scalar fields, for example
+is usually not needed. If your scan policy requires supplied fields, provide a JSON
+object of up to 16 scalar fields, for example
 `{"amount":750,"approved":false}`. Preserve the policy's field types. Nested values,
 malformed JSON and incomplete semantic results fail closed.
 
@@ -146,16 +148,12 @@ sanitized machine code. Unknown service bodies and exceptions are not displayed.
   Reuse the identity for recovery; use a new one for an intentional new snapshot.
 
 Setup operations execute once using the first item's parameters. Use Check Content
-for per-item scans. **Dataset Reporting Context** accepts JSON with `dataset_id`,
-`record_id`, optional `run_id`, one event date/time and chosen dimensions. For example:
+for per-item scans. When Check Content checks multiple records together, **Dataset**
+chooses where to send their results. The node sets up reporting automatically.
+Keep the Dataset selection and source event IDs unchanged when retrying.
 
-```json
-{"dataset_id":"00000000-0000-4000-8000-000000000001","record_id":"ticket-42","event_date":"2026-10-08","dimensions":{"team":"support"}}
-```
-
-Use `run_id` for run-based datasets. Keep context identical on retry. Never put content,
-credentials or personal data into reporting dimensions. Dataset setup requests do not
-consume scan credits; attaching reporting to a scan does not bypass scan authorization.
+Dataset setup requests do not consume scan credits; attaching reporting to a scan
+does not bypass scan authorization.
 
 ## Example workflow
 
@@ -270,4 +268,4 @@ problems. Report sanitized codes and versions; never share keys or request conte
 
 For Check Content, including redacted output, with more than one non-empty item, choose **Dataset**: **New dataset** (default), **Existing dataset**, or **Standalone scans**. Optionally edit the new dataset name, or search the existing-dataset selector. The node sets up one reporting run before checking any items. Each result includes dataset/run IDs and **report_url**, pinned to that run even after later runs arrive.
 
-Keep source event IDs stable for retries, including retries after a lost setup response. An intentional fresh batch needs fresh source event identities. Explicit reporting contexts remain supported; all items must agree on dataset and run. For separate loop nodes, use Set Up Batch Dataset once before the loop and pass its dataset/run IDs into each record. Setup requires dataset-management permission; it creates no scans or charges.
+Keep source event IDs and the Dataset selection stable for retries, including retries after a lost setup response. An intentional fresh batch needs fresh source event identities. Setup requires dataset-management permission; it creates no scans or charges.
