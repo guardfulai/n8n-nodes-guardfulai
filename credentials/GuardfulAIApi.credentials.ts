@@ -19,7 +19,7 @@ export class GuardfulAIApi implements ICredentialType {
 
   icon: Icon = {
     light: "file:../nodes/GuardfulAI/guardfulai.svg",
-    dark: "file:../nodes/GuardfulAI/guardfulai.dark.svg",
+    dark: "file:../nodes/GuardfulAI/guardfulai.svg",
   };
 
   documentationUrl = "https://www.guardfulai.com/integrations/n8n/";

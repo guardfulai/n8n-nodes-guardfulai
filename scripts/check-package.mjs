@@ -26,7 +26,6 @@ try {
     "package.json",
     "dist/nodes/GuardfulAI/Guardfulai.node.json",
     "dist/nodes/GuardfulAI/guardfulai.svg",
-    "dist/nodes/GuardfulAI/guardfulai.dark.svg",
   ];
   for (const module of [
     "dist/credentials/GuardfulAIApi.credentials",

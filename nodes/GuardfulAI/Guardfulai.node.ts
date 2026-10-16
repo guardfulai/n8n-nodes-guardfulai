@@ -48,7 +48,7 @@ export class Guardfulai implements INodeType {
     group: ["transform"],
     version: 1,
     description: "Check content with a pinned Guardful AI Scan Policy",
-    icon: { light: "file:guardfulai.svg", dark: "file:guardfulai.dark.svg" },
+    icon: { light: "file:guardfulai.svg", dark: "file:guardfulai.svg" },
     subtitle: '={{$parameter["operation"]}}',
     defaults: { name: "Guardful AI" },
     inputs: [NodeConnectionTypes.Main],
